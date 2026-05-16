@@ -31,7 +31,6 @@ import logging
 from typing import Any
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 # =========================================================
 # MODULE-LEVEL SINGLETON — lazy-loaded
@@ -39,11 +38,12 @@ from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
-_MODEL: SentenceTransformer | None = None
+_MODEL: Any | None = None
 
-def _get_model() -> SentenceTransformer:
+def _get_model() -> Any:
     global _MODEL
     if _MODEL is None:
+        from sentence_transformers import SentenceTransformer
         logger.info("Loading SentenceTransformer model (all-MiniLM-L6-v2) …")
         _MODEL = SentenceTransformer("all-MiniLM-L6-v2")
         logger.info("SentenceTransformer model loaded successfully.")
