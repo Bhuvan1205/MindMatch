@@ -4,7 +4,6 @@ import * as React from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Bot,
   Send,
   Loader2,
   Sparkles,
@@ -139,7 +138,7 @@ function MarkdownContent({ content }: { content: string }) {
         td: ({ children }) => (
           <td className="px-3 py-2 text-xs leading-relaxed">{children}</td>
         ),
-        
+
         // Links
         a: ({ href, children }) => (
           <a
@@ -409,8 +408,8 @@ export function ChatInterface() {
         onClick={toggleTemporary}
         className={cn(
           "gap-2 rounded-full border-border/60 px-4 text-xs font-medium shadow-sm transition-all",
-          temporary 
-            ? "bg-amber-500/90 text-white hover:bg-amber-600/90 border-amber-500/20" 
+          temporary
+            ? "bg-amber-500/90 text-white hover:bg-amber-600/90 border-amber-500/20"
             : "bg-background/50 text-muted-foreground hover:bg-primary/10 hover:text-primary hover:border-primary/20 backdrop-blur-xl"
         )}
       >
@@ -456,7 +455,7 @@ export function ChatInterface() {
     if (temporary) {
       setMessages([{ role: "assistant", text: greetingText, id: `greeting-temp-${Date.now()}` }]);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temporary]);
 
   // ── Auto-scroll ───────────────────────────────────────────────────────────
