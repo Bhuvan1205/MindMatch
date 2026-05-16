@@ -27,24 +27,13 @@ string so the two stores are always aligned and cross-queryable.
 
 from __future__ import annotations
 
-import logging
-import os
-
-import chromadb
+from pinecone_client import index
 
 logger = logging.getLogger(__name__)
 
 # =========================================================
 # CONSTANTS
 # =========================================================
-
-COLLECTION_NAME = "user_profiles"
-
-# Resolves to <project_root>/chroma_db/ regardless of where uvicorn
-# is launched from, matching the notebook's ./chroma_db path.
-CHROMA_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "chroma_db")
-)
 
 # ── CRITICAL: This order defines how the 2304-dim vector is built. ──
 # It MUST stay consistent with CATEGORY_MAP in embedding_generator.py.
@@ -59,28 +48,6 @@ EMBEDDING_ORDER: list[str] = [
 ]
 
 EXPECTED_DIM = 384 * len(EMBEDDING_ORDER)   # 2304
-
-# =========================================================
-# SINGLETON CLIENT + COLLECTION
-# (initialised once at module import, reused across all requests)
-#
-# CHROMA_MODE env var:
-#   - "ephemeral"  → in-memory client (for Render / serverless envs
-#                    where the filesystem is not persistent)
-#   - anything else / unset → PersistentClient using CHROMA_PATH
-# =========================================================
-
-_CHROMA_MODE = os.getenv("CHROMA_MODE", "persistent").lower()
-
-if _CHROMA_MODE == "ephemeral":
-    logger.info("ChromaDB running in EPHEMERAL (in-memory) mode.")
-    _client = chromadb.EphemeralClient()
-else:
-    logger.info("Connecting to ChromaDB at: %s", os.path.abspath(CHROMA_PATH))
-    _client = chromadb.PersistentClient(path=CHROMA_PATH)
-
-_collection = _client.get_or_create_collection(name=COLLECTION_NAME)
-logger.info("ChromaDB collection '%s' is ready.", COLLECTION_NAME)
 
 
 # =========================================================
@@ -144,14 +111,14 @@ def store_profile_embedding(
             "Cannot store an empty vector in ChromaDB."
         )
 
-    _collection.upsert(
-        ids=[profile_id],
-        embeddings=[combined],
-        metadatas=[{
+    index.upsert([{
+        "id": profile_id,
+        "values": combined,
+        "metadata": {
             "profile_id": profile_id,
             "name": name or "Unknown",
-        }],
-    )
+        }
+    }])
 
     logger.info(
         "Stored ChromaDB embedding for '%s' (id=%s) — dim: %d / %d",
@@ -195,29 +162,40 @@ def perform_similarity(user_id: str) -> tuple[list[str], list[float]]:
     """
     import numpy as np
 
-    # Fetch the query user's own embedding
-    user_data = _collection.get(ids=[user_id], include=["embeddings"])
-    user_embeddings = user_data["embeddings"]
-
-    if user_embeddings is None or len(user_embeddings) == 0:
+    # Fetch the query user's own embedding from Pinecone
+    fetch_response = index.fetch(ids=[user_id])
+    
+    if user_id not in fetch_response.vectors:
         raise ValueError(
-            f"No embedding found in ChromaDB for user_id='{user_id}'. "
+            f"No embedding found in Pinecone for user_id='{user_id}'. "
             "Ensure the profile has been stored before running similarity search."
         )
+        
+    user_embeddings = fetch_response.vectors[user_id].values
 
-    # Query for top-N neighbours (n_results=11 so we can drop the self-match
+    # Query for top-N neighbours (top_k=11 so we can drop the self-match
     # and pass the remaining 10 candidates to the reranker)
-    similar_users = _collection.query(
-        query_embeddings=user_embeddings,
-        n_results=11,
+    results = index.query(
+        vector=user_embeddings,
+        top_k=11,
+        include_metadata=False
     )
 
-    all_ids: list[str] = np.array(similar_users["ids"]).flatten().tolist()
-    all_distances: list[float] = np.array(similar_users["distances"]).flatten().tolist()
+    result_ids = []
+    result_distances = []
+    
+    for match in results.matches:
+        if match.id == user_id:
+            continue
+        result_ids.append(match.id)
+        # Pinecone returns similarity scores, which we treat as "distances" conceptually
+        result_distances.append(match.score)
 
-    # Skip index 0 — the user themselves (always the nearest neighbour)
-    result_ids = all_ids[1:]
-    result_distances = all_distances[1:]
+    # In case the user themselves wasn't returned in the top-k for some reason,
+    # just trim to top 10 if we have 11.
+    if len(result_ids) > 10:
+        result_ids = result_ids[:10]
+        result_distances = result_distances[:10]
 
     logger.info(
         "Similarity search for user '%s' returned %d candidate(s) for reranking.",

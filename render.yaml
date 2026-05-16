@@ -18,5 +18,9 @@ services:
         value: 10080
       - key: GOOGLE_CLIENT_ID
         sync: false
-      - key: CHROMA_MODE
-        value: ephemeral
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: PINECONE_INDEX_NAME
+        sync: false
+      - key: PINECONE_MEMORY_INDEX_NAME
+        sync: false

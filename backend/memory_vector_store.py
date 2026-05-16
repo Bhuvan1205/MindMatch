@@ -17,27 +17,10 @@ Embedding model:
 
 from __future__ import annotations
 
-import logging
-import os
-
-import chromadb
-
+from pinecone_client import memory_index
 from embedding_generator import _get_model
 
 logger = logging.getLogger(__name__)
-
-# ── ChromaDB setup ────────────────────────────────────────────────────────────
-
-MEMORY_COLLECTION_NAME = "episodic_memories"
-
-CHROMA_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "chroma_db")
-)
-
-logger.info("memory_vector_store: connecting to ChromaDB at %s", os.path.abspath(CHROMA_PATH))
-_client = chromadb.PersistentClient(path=CHROMA_PATH)
-_memory_collection = _client.get_or_create_collection(name=MEMORY_COLLECTION_NAME)
-logger.info("memory_vector_store: collection '%s' ready.", MEMORY_COLLECTION_NAME)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -63,12 +46,19 @@ def store_memory_embedding(
     model = _get_model()
     vector = model.encode(summary_text).tolist()
 
-    _memory_collection.upsert(
-        ids=[memory_id],
-        embeddings=[vector],
-        metadatas=[{"user_id": user_id, "memory_id": memory_id}],
-        documents=[summary_text],
-    )
+    if memory_index is None:
+        logger.warning("PINECONE_MEMORY_INDEX_NAME is not set! Skipping memory storage.")
+        return
+        
+    memory_index.upsert([{
+        "id": memory_id,
+        "values": vector,
+        "metadata": {
+            "user_id": user_id, 
+            "memory_id": memory_id,
+            "text": summary_text
+        }
+    }])
 
     logger.info(
         "memory_vector_store: stored embedding for memory_id=%s (user=%s)",
@@ -104,15 +94,22 @@ def retrieve_relevant_memories(
     model = _get_model()
     query_vector = model.encode(query_text).tolist()
 
+    if memory_index is None:
+        return []
+
     try:
-        results = _memory_collection.query(
-            query_embeddings=[query_vector],
-            n_results=top_k,
-            where={"user_id": user_id},
-            include=["documents"],
+        results = memory_index.query(
+            vector=query_vector,
+            top_k=top_k,
+            filter={"user_id": user_id},
+            include_metadata=True
         )
-        docs: list[str] = results.get("documents", [[]])[0]
-        return [d for d in docs if d]
+        
+        docs = []
+        for match in results.matches:
+            if match.metadata and "text" in match.metadata:
+                docs.append(match.metadata["text"])
+        return docs
     except Exception as e:
         # If no memories exist yet, ChromaDB may raise — degrade gracefully
         logger.warning(
