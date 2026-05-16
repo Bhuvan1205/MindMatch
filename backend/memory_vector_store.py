@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from pinecone_client import memory_index
 from embedding_generator import _get_model
+import logging
 
 logger = logging.getLogger(__name__)
 
