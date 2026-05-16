@@ -26,7 +26,7 @@ string so the two stores are always aligned and cross-queryable.
 """
 
 from __future__ import annotations
-
+import logging
 from pinecone_client import index
 
 logger = logging.getLogger(__name__)
