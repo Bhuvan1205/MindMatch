@@ -47,7 +47,7 @@ def perform_web_search(query: str, max_results: int = 3) -> list[dict]:
     Returns a list of concise snippets.
     """
     try:
-        from ddgs import DDGS
+        from duckduckgo_search import DDGS
         
         print(f"\n[WEB SEARCH] Searching DuckDuckGo for: '{query}'\n")
         logger.info(f"Performing web search for: '{query}'")
