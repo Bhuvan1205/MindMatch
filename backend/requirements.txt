@@ -1,0 +1,25 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+
+# Database
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+python-dotenv==1.0.1
+
+# Auth
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+google-auth==2.36.0
+requests==2.32.3
+
+# LLM / AI
+openai==1.57.2
+langchain==0.3.12
+langchain-openai==0.2.11
+langchain-community==0.3.12
+
+# Embeddings / Vector store
+sentence-transformers==3.3.1
+chromadb==0.5.23
+numpy==1.26.4
