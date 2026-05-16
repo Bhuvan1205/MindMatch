@@ -1,0 +1,63 @@
+# ── Secrets & Environment ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# ── Jupyter Notebooks (outputs only) ─────────────────────────────────────────
+# Uncomment below to also ignore .ipynb files entirely
+# *.ipynb
+.ipynb_checkpoints/
+
+# ── ChromaDB / Vector Store ───────────────────────────────────────────────────
+chroma_db/
+
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+.vercel/
+*.tsbuildinfo
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+
+# ── OS / Editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.bak
+*.tmp
