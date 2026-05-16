@@ -21,6 +21,7 @@ openai==1.57.2
 langchain==0.3.12
 langchain-openai==0.2.11
 langchain-community==0.3.12
+duckduckgo-search==6.4.1
 
 # Embeddings / Vector store
 sentence-transformers==3.3.1
