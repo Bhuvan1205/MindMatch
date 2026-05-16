@@ -117,7 +117,7 @@ export function MatchesScreen() {
           <h1 className="mt-3 text-pretty text-3xl font-medium tracking-tight sm:text-4xl">
             People likely to think well with <span className="capitalize">{data?.query_user || profile.name || "you"}</span>
           </h1>
-            We've found people who share your goals, learning strategies, and cognitive patterns.
+            We&apos;ve found people who share your goals, learning strategies, and cognitive patterns.
         </motion.div>
 
         <motion.div variants={staggerContainer} className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-3">

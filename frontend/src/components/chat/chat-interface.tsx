@@ -317,7 +317,6 @@ export function ChatInterface() {
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [streamError, setStreamError] = React.useState<string | null>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
-  const abortRef = React.useRef<AbortController | null>(null);
 
   const { setSessionId, setExchanges, clearChat, temporary, toggleTemporary } = useChatStore();
   const { profile } = useProfileStore();

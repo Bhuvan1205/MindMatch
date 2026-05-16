@@ -7,21 +7,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Users2,
   UserCircle2,
-  Sparkles,
   LogOut,
   Menu,
   X,
   Moon,
   Sun,
   MessageSquare,
-  SquareX,
-  Loader2,
 } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useMutation } from "@tanstack/react-query";
 
-import { mindmatchApi } from "@/lib/api/mindmatch";
-import { useChatStore } from "@/stores/chat-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { useInterviewStore } from "@/stores/interview-store";
 import { useProfileStore } from "@/stores/profile-store";

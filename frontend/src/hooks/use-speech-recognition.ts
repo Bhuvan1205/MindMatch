@@ -17,6 +17,7 @@ export function useSpeechRecognition(onResult?: (text: string) => void): SpeechR
   const [interimTranscript, setInterimTranscript] = useState("");
   const [hasRecognitionSupport, setHasRecognitionSupport] = useState(false);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
   const onResultRef = useRef(onResult);
 
@@ -27,6 +28,7 @@ export function useSpeechRecognition(onResult?: (text: string) => void): SpeechR
   useEffect(() => {
     if (typeof window !== "undefined") {
       const SpeechRecognition =
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
       if (SpeechRecognition) {
@@ -35,6 +37,7 @@ export function useSpeechRecognition(onResult?: (text: string) => void): SpeechR
         recognitionRef.current.continuous = true;
         recognitionRef.current.interimResults = true;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         recognitionRef.current.onresult = (event: any) => {
           let currentTranscript = "";
           let currentInterimTranscript = "";
@@ -56,6 +59,7 @@ export function useSpeechRecognition(onResult?: (text: string) => void): SpeechR
           setInterimTranscript(currentInterimTranscript);
         };
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         recognitionRef.current.onerror = (event: any) => {
           console.error("Speech recognition error", event.error);
           setIsListening(false);
