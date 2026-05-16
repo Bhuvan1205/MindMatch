@@ -63,10 +63,22 @@ EXPECTED_DIM = 384 * len(EMBEDDING_ORDER)   # 2304
 # =========================================================
 # SINGLETON CLIENT + COLLECTION
 # (initialised once at module import, reused across all requests)
+#
+# CHROMA_MODE env var:
+#   - "ephemeral"  → in-memory client (for Render / serverless envs
+#                    where the filesystem is not persistent)
+#   - anything else / unset → PersistentClient using CHROMA_PATH
 # =========================================================
 
-logger.info("Connecting to ChromaDB at: %s", os.path.abspath(CHROMA_PATH))
-_client = chromadb.PersistentClient(path=CHROMA_PATH)
+_CHROMA_MODE = os.getenv("CHROMA_MODE", "persistent").lower()
+
+if _CHROMA_MODE == "ephemeral":
+    logger.info("ChromaDB running in EPHEMERAL (in-memory) mode.")
+    _client = chromadb.EphemeralClient()
+else:
+    logger.info("Connecting to ChromaDB at: %s", os.path.abspath(CHROMA_PATH))
+    _client = chromadb.PersistentClient(path=CHROMA_PATH)
+
 _collection = _client.get_or_create_collection(name=COLLECTION_NAME)
 logger.info("ChromaDB collection '%s' is ready.", COLLECTION_NAME)
 

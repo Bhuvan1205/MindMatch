@@ -66,6 +66,7 @@ export function ProfileProcessingScreen() {
           className="max-w-md rounded-lg border bg-card/78 p-8 text-center shadow-soft backdrop-blur-xl"
         >
           <h1 className="text-2xl font-semibold">No completed interview found</h1>
+          <p>
             Profile generation requires a completed interview history.
           </p>
           <Button asChild className="mt-7">

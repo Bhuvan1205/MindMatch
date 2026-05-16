@@ -40,11 +40,20 @@ def create_tables():
 
 # =========================================================
 # CORS — allows the frontend to call the API
+# Set ALLOWED_ORIGINS env var to a comma-separated list of allowed origins
+# e.g. "https://mindmatch.vercel.app,https://www.mindmatch.vercel.app"
+# Defaults to wildcard for local development.
 # =========================================================
+
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+if _raw_origins == "*":
+    _allow_origins = ["*"]
+else:
+    _allow_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
