@@ -21,6 +21,7 @@ import { useInterviewStore } from "@/stores/interview-store";
 import { useProfileStore } from "@/stores/profile-store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { NotificationCenter } from "@/components/notifications/notification-center";
 
 type NavItem = {
   label: string;
@@ -103,6 +104,8 @@ export function AppNavbar() {
           })}
           
           <div className="mx-3 h-4 w-px bg-border/60" />
+
+          <NotificationCenter />
           
           <Button
             type="button"
@@ -128,6 +131,7 @@ export function AppNavbar() {
 
         {/* Mobile Toggle */}
         <div className="flex items-center gap-2 md:hidden">
+          <NotificationCenter />
           <Button
             type="button"
             variant="ghost"

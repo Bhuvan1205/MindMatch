@@ -195,3 +195,48 @@ export type ExperienceAskResponse = {
     recent_exchange_count: number;
   };
 };
+
+export type NotificationConnectionRequest = {
+  connection_id: string;
+  requester_id: string;
+  requester_name: string | null;
+  created_at: string;
+};
+
+export type NotificationMessage = {
+  message_id: string;
+  connection_id: string;
+  sender_id: string;
+  sender_name: string | null;
+  message: string;
+  created_at: string;
+  read_at: string | null;
+};
+
+export type NotificationAcceptedRequest = {
+  connection_id: string;
+  recipient_id: string;
+  recipient_name: string | null;
+  accepted_at: string;
+};
+
+export type NotificationsResponse = {
+  pending_request_count: number;
+  unread_message_count: number;
+  requests: NotificationConnectionRequest[];
+  messages: NotificationMessage[];
+  accepted_requests: NotificationAcceptedRequest[];
+};
+
+export type MarkNotificationReadRequest = {
+  message_id: string;
+};
+
+export type MarkNotificationReadResponse = {
+  message_id: string;
+  read_at: string | null;
+};
+
+export type MarkAllNotificationsReadResponse = {
+  updated_count: number;
+};

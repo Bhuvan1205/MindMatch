@@ -22,6 +22,10 @@ import type {
   DirectMessageThreadResponse,
   ExperienceAskRequest,
   ExperienceAskResponse,
+  MarkNotificationReadRequest,
+  MarkNotificationReadResponse,
+  MarkAllNotificationsReadResponse,
+  NotificationsResponse,
   UserConnection,
 } from "@/lib/api/types";
 
@@ -128,6 +132,23 @@ export const mindmatchApi = {
     return apiRequest<ExperienceAskResponse>("/experience/ask", {
       method: "POST",
       body,
+    });
+  },
+
+  notifications() {
+    return apiRequest<NotificationsResponse>("/notifications");
+  },
+
+  markNotificationRead(body: MarkNotificationReadRequest) {
+    return apiRequest<MarkNotificationReadResponse>("/notifications/read", {
+      method: "POST",
+      body,
+    });
+  },
+
+  markAllNotificationsRead() {
+    return apiRequest<MarkAllNotificationsReadResponse>("/notifications/read-all", {
+      method: "POST",
     });
   },
 };

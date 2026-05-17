@@ -19,7 +19,10 @@ export function ConnectionsScreen() {
 
   const acceptMutation = useMutation({
     mutationFn: mindmatchApi.acceptConnection,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["connections"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
   });
 
   const connections = connectionsQuery.data?.connections ?? [];

@@ -713,6 +713,14 @@ class ExperienceAskRequest(BaseModel):
     question: str
 
 
+class MarkNotificationReadRequest(BaseModel):
+    message_id: str
+
+
+class MarkAllNotificationsReadResponse(BaseModel):
+    updated_count: int
+
+
 # =========================================================
 # CONNECTIONS + DIRECT MESSAGES + EXPERIENCE ROUTING
 # =========================================================
@@ -729,6 +737,16 @@ def _serialize_connection(connection: UserConnection, current_user_id: str) -> d
         "updated_at": connection.updated_at.isoformat(),
         "is_incoming": str(connection.recipient_id) == current_user_id,
     }
+
+
+def _latest_profile_name(user_id, db: Session) -> str | None:
+    profile = (
+        db.query(UserProfile)
+        .filter(UserProfile.user_id == user_id)
+        .order_by(UserProfile.created_at.desc())
+        .first()
+    )
+    return profile.name if profile else None
 
 
 @app.post('/connections/request')
@@ -792,6 +810,132 @@ def list_connections(
         .all()
     )
     return {"connections": [_serialize_connection(c, str(current_user.id)) for c in connections]}
+
+
+@app.get('/notifications')
+def list_notifications(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    incoming_requests = (
+        db.query(UserConnection)
+        .filter(
+            UserConnection.recipient_id == current_user.id,
+            UserConnection.status == "pending",
+        )
+        .order_by(UserConnection.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    received_messages = (
+        db.query(DirectMessage)
+        .filter(DirectMessage.receiver_id == current_user.id)
+        .order_by(DirectMessage.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    unread_message_count = (
+        db.query(DirectMessage)
+        .filter(
+            DirectMessage.receiver_id == current_user.id,
+            DirectMessage.read_at.is_(None),
+        )
+        .count()
+    )
+
+    accepted_requests = (
+        db.query(UserConnection)
+        .filter(
+            UserConnection.requester_id == current_user.id,
+            UserConnection.status == "accepted",
+        )
+        .order_by(UserConnection.updated_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    return {
+        "pending_request_count": len(incoming_requests),
+        "unread_message_count": unread_message_count,
+        "requests": [
+            {
+                "connection_id": str(connection.id),
+                "requester_id": str(connection.requester_id),
+                "requester_name": _latest_profile_name(connection.requester_id, db),
+                "created_at": connection.created_at.isoformat(),
+            }
+            for connection in incoming_requests
+        ],
+        "messages": [
+            {
+                "message_id": str(message.id),
+                "connection_id": str(message.connection_id),
+                "sender_id": str(message.sender_id),
+                "sender_name": _latest_profile_name(message.sender_id, db),
+                "message": message.message,
+                "created_at": message.created_at.isoformat(),
+                "read_at": message.read_at.isoformat() if message.read_at else None,
+            }
+            for message in received_messages
+        ],
+        "accepted_requests": [
+            {
+                "connection_id": str(connection.id),
+                "recipient_id": str(connection.recipient_id),
+                "recipient_name": _latest_profile_name(connection.recipient_id, db),
+                "accepted_at": connection.updated_at.isoformat(),
+            }
+            for connection in accepted_requests
+        ],
+    }
+
+
+@app.post('/notifications/read')
+def mark_notification_read(
+    body: MarkNotificationReadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    import uuid as _uuid
+
+    message = db.query(DirectMessage).filter(DirectMessage.id == _uuid.UUID(body.message_id)).first()
+    if message is None or message.receiver_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+
+    if message.read_at is None:
+        from datetime import datetime
+
+        message.read_at = datetime.utcnow()
+        db.commit()
+        db.refresh(message)
+
+    return {"message_id": str(message.id), "read_at": message.read_at.isoformat() if message.read_at else None}
+
+
+@app.post('/notifications/read-all', response_model=MarkAllNotificationsReadResponse)
+def mark_all_notifications_read(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from datetime import datetime
+
+    unread_messages = (
+        db.query(DirectMessage)
+        .filter(
+            DirectMessage.receiver_id == current_user.id,
+            DirectMessage.read_at.is_(None),
+        )
+        .all()
+    )
+
+    now = datetime.utcnow()
+    for message in unread_messages:
+        message.read_at = now
+
+    db.commit()
+    return MarkAllNotificationsReadResponse(updated_count=len(unread_messages))
 
 
 @app.post('/connections/accept')
