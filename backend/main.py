@@ -725,7 +725,9 @@ class MarkAllNotificationsReadResponse(BaseModel):
 # CONNECTIONS + DIRECT MESSAGES + EXPERIENCE ROUTING
 # =========================================================
 
-def _serialize_connection(connection: UserConnection, current_user_id: str) -> dict:
+def _serialize_connection(connection: UserConnection, current_user_id: str, db: Session = None) -> dict:
+    target_user_id = connection.requester_id if str(connection.recipient_id) == current_user_id else connection.recipient_id
+    target_name = _latest_profile_name(target_user_id, db) if db else None
     return {
         "connection_id": str(connection.id),
         "requester_id": str(connection.requester_id),
@@ -736,6 +738,7 @@ def _serialize_connection(connection: UserConnection, current_user_id: str) -> d
         "created_at": connection.created_at.isoformat(),
         "updated_at": connection.updated_at.isoformat(),
         "is_incoming": str(connection.recipient_id) == current_user_id,
+        "target_name": target_name,
     }
 
 
@@ -780,7 +783,7 @@ def request_connection(
         .first()
     )
     if existing:
-        return _serialize_connection(existing, str(current_user.id))
+        return _serialize_connection(existing, str(current_user.id), db)
 
     connection = UserConnection(
         requester_id=current_user.id,
@@ -792,7 +795,7 @@ def request_connection(
     db.add(connection)
     db.commit()
     db.refresh(connection)
-    return _serialize_connection(connection, str(current_user.id))
+    return _serialize_connection(connection, str(current_user.id), db)
 
 
 @app.get('/connections')
@@ -809,7 +812,7 @@ def list_connections(
         .order_by(UserConnection.updated_at.desc())
         .all()
     )
-    return {"connections": [_serialize_connection(c, str(current_user.id)) for c in connections]}
+    return {"connections": [_serialize_connection(c, str(current_user.id), db) for c in connections]}
 
 
 @app.get('/notifications')
@@ -955,7 +958,7 @@ def accept_connection(
     connection.status = "accepted"
     db.commit()
     db.refresh(connection)
-    return _serialize_connection(connection, str(current_user.id))
+    return _serialize_connection(connection, str(current_user.id), db)
 
 
 @app.post('/direct-messages/send')
@@ -1017,7 +1020,7 @@ def list_direct_messages(
         .all()
     )
     return {
-        "connection": _serialize_connection(connection, str(current_user.id)),
+        "connection": _serialize_connection(connection, str(current_user.id), db),
         "messages": [
             {
                 "message_id": str(m.id),

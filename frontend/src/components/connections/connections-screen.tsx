@@ -14,6 +14,12 @@ export function ConnectionsScreen() {
   const queryClient = useQueryClient();
   const [activeConnectionId, setActiveConnectionId] = React.useState<string | null>(null);
 
+  const meQuery = useQuery({
+    queryKey: ["me"],
+    queryFn: mindmatchApi.getMe,
+  });
+  const currentUserId = meQuery.data?.user_id;
+
   const connectionsQuery = useQuery({
     queryKey: ["connections"],
     queryFn: mindmatchApi.listConnections,
@@ -91,7 +97,7 @@ export function ConnectionsScreen() {
                     <MessageCircle className="size-5" />
                   </div>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">Connection {connection.connection_id.slice(0, 8)}</p>
+                    <p className="truncate text-sm font-semibold">{connection.target_name || `Connection ${connection.connection_id.slice(0, 8)}`}</p>
                     <p className="truncate text-xs text-muted-foreground capitalize mt-0.5">
                       {isAccepted ? "Active Chat" : isPendingIncoming ? "Incoming request" : "Outgoing request"}
                     </p>
@@ -126,7 +132,7 @@ export function ConnectionsScreen() {
       <div className="flex flex-1 flex-col bg-background relative max-w-full">
         <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_50%,hsl(var(--primary)/0.03),transparent_40rem)]" />
         {activeConnection ? (
-          <ChatThread connection={activeConnection} />
+          <ChatThread connection={activeConnection} currentUserId={currentUserId} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-center p-8">
             <div className="flex size-20 items-center justify-center rounded-full bg-primary/5 text-primary/40 mb-6">
@@ -143,7 +149,7 @@ export function ConnectionsScreen() {
   );
 }
 
-function ChatThread({ connection }: { connection: UserConnection }) {
+function ChatThread({ connection, currentUserId }: { connection: UserConnection; currentUserId?: string }) {
   const [message, setMessage] = React.useState("");
   const scrollRef = React.useRef<HTMLDivElement>(null);
   
@@ -175,7 +181,7 @@ function ChatThread({ connection }: { connection: UserConnection }) {
           <MessageCircle className="size-5" />
         </div>
         <div>
-          <h2 className="font-semibold text-foreground tracking-tight">Connection {connection.connection_id.slice(0, 8)}</h2>
+          <h2 className="font-semibold text-foreground tracking-tight">{connection.target_name || `Connection ${connection.connection_id.slice(0, 8)}`}</h2>
           <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
             <span className="relative flex size-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
@@ -195,12 +201,19 @@ function ChatThread({ connection }: { connection: UserConnection }) {
         ) : (
           <div className="flex flex-col space-y-4">
             {(threadQuery.data?.messages ?? []).map((item) => {
+              const isMe = item.sender_id === currentUserId;
               return (
-                <div key={item.message_id} className="max-w-[85%] rounded-2xl rounded-tl-sm bg-muted/60 p-4 text-sm shadow-sm border border-border/50">
-                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                  <p className="leading-relaxed text-foreground">{item.message}</p>
+                <div key={item.message_id} className={`flex w-full ${isMe ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-2xl p-4 text-sm shadow-sm border ${
+                    isMe 
+                      ? "bg-primary text-primary-foreground rounded-tr-sm border-primary/20" 
+                      : "bg-muted/60 text-foreground rounded-tl-sm border-border/50"
+                  }`}>
+                    <p className={`mb-1.5 text-[10px] font-semibold uppercase tracking-wider ${isMe ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                      {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    <p className="leading-relaxed">{item.message}</p>
+                  </div>
                 </div>
               );
             })}

@@ -149,6 +149,7 @@ export type UserConnection = {
   created_at: string;
   updated_at: string;
   is_incoming: boolean;
+  target_name?: string | null;
 };
 
 export type ConnectionRequest = {
