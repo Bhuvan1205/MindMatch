@@ -56,6 +56,11 @@ def create_tables():
                 f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type};"
             ))
 
+        # 3. Repair any historical sessions where is_active=False but ended_at is NULL
+        conn.execute(text(
+            "UPDATE chat_sessions SET ended_at = created_at WHERE is_active = FALSE AND ended_at IS NULL;"
+        ))
+
 # =========================================================
 # CORS — allows the frontend to call the API
 # Set ALLOWED_ORIGINS env var to a comma-separated list of allowed origins

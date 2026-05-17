@@ -51,14 +51,14 @@ def get_or_create_session(user_id: str, db: DBSession) -> str:
     str
         The active session_id UUID string.
     """
-    session = (
+    active_sessions = (
         db.query(ChatSession)
         .filter(ChatSession.user_id == uuid.UUID(user_id), ChatSession.is_active == True)
         .order_by(ChatSession.created_at.desc())
-        .first()
+        .all()
     )
 
-    if session is None:
+    if not active_sessions:
         session = ChatSession(
             user_id=uuid.UUID(user_id),
             is_active=True,
@@ -67,6 +67,18 @@ def get_or_create_session(user_id: str, db: DBSession) -> str:
         db.commit()
         db.refresh(session)
         logger.info("memory_manager: created new session %s for user %s", session.id, user_id)
+        return str(session.id)
+        
+    session = active_sessions[0]
+    
+    # Integrity check: if multiple active sessions somehow exist, archive the older ones
+    if len(active_sessions) > 1:
+        now = datetime.utcnow()
+        for old_s in active_sessions[1:]:
+            old_s.is_active = False
+            old_s.ended_at = now
+            logger.warning("memory_manager: auto-archived stale active session %s for user %s", old_s.id, user_id)
+        db.commit()
 
     return str(session.id)
 
@@ -76,15 +88,26 @@ def roll_new_session(user_id: str, old_session_id: str, db: DBSession) -> str:
     Close the current session and open a fresh one.
     Called automatically after summarization or manual end-session.
     """
-    # Mark old session inactive
-    old = db.query(ChatSession).filter(
-        ChatSession.id == uuid.UUID(old_session_id)
-    ).first()
-    if old:
+    # Enforce integrity: Mark ALL active sessions for this user as inactive atomically
+    now = datetime.utcnow()
+    active_sessions = db.query(ChatSession).filter(
+        ChatSession.user_id == uuid.UUID(user_id),
+        ChatSession.is_active == True
+    ).all()
+    
+    for s in active_sessions:
+        s.is_active = False
+        s.ended_at = now
+        logger.info("memory_manager: integrity cleanup - marked session %s inactive with ended_at = %s", s.id, now)
+
+    # In case the explicitly requested old_session_id was somehow not in the active list
+    old = db.query(ChatSession).filter(ChatSession.id == uuid.UUID(old_session_id)).first()
+    if old and old.is_active:
         old.is_active = False
-        old.ended_at = datetime.utcnow()
-        db.commit()
-        logger.info("memory_manager: old session %s marked inactive with ended_at = %s", old.id, old.ended_at)
+        old.ended_at = now
+        logger.info("memory_manager: explicitly marked old session %s inactive", old.id)
+        
+    db.commit()
 
     # Create fresh session
     new_session = ChatSession(
