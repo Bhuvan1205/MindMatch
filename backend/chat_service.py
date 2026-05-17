@@ -100,8 +100,20 @@ def _build_history_payload(session_id: str, exchanges: list[ConversationExchange
             }
         )
 
-    message_feed.extend(build_chat_history_messages(user_id, db))
-    message_feed.sort(key=lambda item: (item.get("created_at") or "", item["id"]))
+    # Tag each message with its insertion position before merging relay messages.
+    # User + assistant in the same exchange share identical created_at timestamps, so
+    # the old id-string tiebreaker sorted "history-assistant-N" before "history-user-N"
+    # (because 'a' < 'u'), putting the reply above the user message. Using a numeric
+    # seq preserves insertion order for same-timestamp pairs.
+    for seq, msg in enumerate(message_feed):
+        msg["_seq"] = seq
+    relay_messages = build_chat_history_messages(user_id, db)
+    for seq, msg in enumerate(relay_messages, start=len(message_feed)):
+        msg["_seq"] = seq
+    message_feed.extend(relay_messages)
+    message_feed.sort(key=lambda item: (item.get("created_at") or "", item["_seq"]))
+    for msg in message_feed:
+        msg.pop("_seq", None)
 
     return {
         "session_id": session_id,
@@ -250,7 +262,8 @@ def send_message(user_id: str, message: str, db: DBSession, temporary: bool = Fa
 
     relay_request = _maybe_create_matcha_relay(user_id, message, db, user_profile)
     relay_notice = relay_request["notice"] if relay_request else None
-    if relay_request and not relay_request.get("created"):
+    if relay_request:
+        # Whether created or failed, return the relay notice and stop — do not call the LLM.
         _persist_exchange(user_id, session_id, message, relay_notice, db, temporary)
         return {"response": relay_notice, "session_id": session_id}
 
@@ -269,8 +282,6 @@ def send_message(user_id: str, message: str, db: DBSession, temporary: bool = Fa
 
     llm_response = _chat_model.invoke(prompt_messages)
     assistant_reply = llm_response.content.strip()
-    if relay_notice:
-        assistant_reply = f"{relay_notice}\n\nIn the meantime, here's my take:\n\n{assistant_reply}"
 
     _persist_exchange(user_id, session_id, message, assistant_reply, db, temporary)
 
@@ -330,7 +341,8 @@ async def stream_message(
 
     relay_request = _maybe_create_matcha_relay(user_id, message, db, user_profile)
     relay_notice = relay_request["notice"] if relay_request else None
-    if relay_request and not relay_request.get("created"):
+    if relay_request:
+        # Whether created or failed, return the relay notice and stop — do not call the LLM.
         _persist_exchange(user_id, session_id, message, relay_notice, db, temporary)
         yield f"data: {json.dumps(relay_notice)}\n\n"
         yield "data: [DONE]\n\n"
@@ -352,10 +364,6 @@ async def stream_message(
     full_response_parts: list[str] = []
 
     try:
-        if relay_notice:
-            intro = f"{relay_notice}\n\nIn the meantime, here's my take:\n\n"
-            full_response_parts.append(intro)
-            yield f"data: {json.dumps(intro)}\n\n"
         async for chunk in _chat_model.astream(prompt_messages):
             token = chunk.content
             if token:
