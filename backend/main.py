@@ -39,6 +39,7 @@ app = FastAPI()
 _SCHEMA_MIGRATIONS = [
     ("user_connections", "recipient_request_seen_at",  "TIMESTAMP"),
     ("user_connections", "requester_accepted_seen_at", "TIMESTAMP"),
+    ("chat_sessions", "ended_at", "TIMESTAMP"),
 ]
 
 @app.on_event('startup')
@@ -1239,6 +1240,7 @@ class ChatSendResponse(BaseModel):
 class ChatEndResponse(BaseModel):
     message: str
     summary: str | None
+    session_id: str
 
 
 @app.post('/chat/send', response_model=ChatSendResponse)
@@ -1280,6 +1282,7 @@ def chat_send(
 
 @app.get('/chat/history')
 def chat_history(
+    session_id: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1289,7 +1292,7 @@ def chat_history(
     Auth: Required (Bearer JWT).
     """
     try:
-        return chat_get_history(user_id=str(current_user.id), db=db)
+        return chat_get_history(user_id=str(current_user.id), db=db, session_id=session_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load history: {str(e)}")
 
@@ -1369,7 +1372,7 @@ def chat_end_session(
     session_id = get_or_create_session(str(resolved_user.id), db)
 
     try:
-        summary = memory_end_session(
+        summary, new_session_id = memory_end_session(
             user_id=str(resolved_user.id),
             session_id=session_id,
             db=db,
@@ -1380,4 +1383,5 @@ def chat_end_session(
     return ChatEndResponse(
         message="Session ended. Your conversation has been saved to memory.",
         summary=summary,
+        session_id=new_session_id,
     )

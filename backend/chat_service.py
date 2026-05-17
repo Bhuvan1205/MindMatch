@@ -334,8 +334,13 @@ def send_message(user_id: str, message: str, db: DBSession, temporary: bool = Fa
     }
 
 
-def get_history(user_id: str, db: DBSession) -> dict:
-    session_id = get_or_create_session(user_id, db)
+def get_history(user_id: str, db: DBSession, session_id: str | None = None) -> dict:
+    if not session_id:
+        session_id = get_or_create_session(user_id, db)
+        logger.info("chat_service: fetching history for active session %s", session_id)
+    else:
+        logger.info("chat_service: fetching history for explicit session %s", session_id)
+    
     exchanges = get_active_window(session_id, db)
     return _build_history_payload(session_id, exchanges, user_id, db)
 

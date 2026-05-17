@@ -81,6 +81,7 @@ def roll_new_session(user_id: str, old_session_id: str, db: DBSession) -> str:
     ).first()
     if old:
         old.is_active = False
+        old.ended_at = datetime.utcnow()
         db.commit()
 
     # Create fresh session
@@ -173,14 +174,14 @@ def check_and_compress(user_id: str, session_id: str, db: DBSession) -> str:
 
 # ── Explicit end-session ──────────────────────────────────────────────────────
 
-def end_session(user_id: str, session_id: str, db: DBSession) -> str | None:
+def end_session(user_id: str, session_id: str, db: DBSession) -> tuple[str | None, str]:
     """
     Explicitly close a session: summarize whatever is in the window (if anything),
     persist it, and roll to a new session.
 
     Called by POST /chat/end-session.
 
-    Returns the summary text or None if the window was empty.
+    Returns the summary text or None if the window was empty, and the new session_id.
     """
     exchanges = get_active_window(session_id, db)
 
@@ -208,5 +209,6 @@ def end_session(user_id: str, session_id: str, db: DBSession) -> str | None:
             db.rollback()
             logger.error("memory_manager: end_session summarization failed — %s", e)
 
-    roll_new_session(user_id, session_id, db)
-    return summary_text
+    new_session_id = roll_new_session(user_id, session_id, db)
+    logger.info("memory_manager: explicit end_session completed for user %s, old %s -> new %s", user_id, session_id, new_session_id)
+    return summary_text, new_session_id
