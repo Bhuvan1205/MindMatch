@@ -26,8 +26,23 @@ def _strip_code_fences(text: str) -> str:
     return stripped
 
 
+_RELAY_KEYWORDS = (
+    "ask ", "tell ", "find out", "what does", "what is", "what are",
+    "relay", "can you ask", "can you tell", "pass this", "forward this",
+    "what's", "whats", "how is", "how does", "their ", "her ", "his ",
+)
+
+
+def _looks_like_relay_intent(message: str) -> bool:
+    """Fast keyword pre-filter — skips the LLM call for clearly non-relay messages."""
+    lowered = message.lower()
+    return any(kw in lowered for kw in _RELAY_KEYWORDS)
+
+
 def detect_relay_intent(user_id: str, message: str, matched_profiles: list[dict] | None) -> dict | None:
     if not matched_profiles:
+        return None
+    if not _looks_like_relay_intent(message):
         return None
 
     matches_context = [
@@ -50,17 +65,22 @@ def detect_relay_intent(user_id: str, message: str, matched_profiles: list[dict]
         {
             "role": "system",
             "content": (
-                "You detect whether a MindMatch user is asking Matcha to anonymously relay a question to a specific matched person. "
-                "Return strict JSON with keys should_relay, target_profile_id, rewritten_question, and confidence. "
-                "Only set should_relay to true when the user is clearly asking for someone's advice, experience, perspective, or suggestions. "
-                "Only choose a target_profile_id when one match is identifiable from the user's wording and the match list."
+                "You are a relay-intent detector for MindMatch's Matcha AI. "
+                "Decide if the user wants Matcha to forward a question or request to one of their named matches or connections.\n\n"
+                "Trigger relay (should_relay: true) when the user:\n"
+                "  - Names or refers to a person in the candidate list (e.g. 'ask Bhagya', 'tell Rahul', 'what is X doing')\n"
+                "  - Asks about that person's current activities, learning, projects, goals, opinions, advice, or experience\n"
+                "  - Uses phrasing like 'can you ask', 'find out from', 'ask them', 'what does X think', 'what is X learning'\n\n"
+                "Do NOT trigger relay for general questions not directed at a specific person in the list.\n\n"
+                "Return ONLY a raw JSON object — no markdown fences, no explanation — with exactly these keys:\n"
+                "  should_relay (bool), target_profile_id (string or null), rewritten_question (string), confidence (float 0-1)"
             ),
         },
         {
             "role": "user",
             "content": (
                 f"[User ID]\n{user_id}\n\n"
-                f"[Matched Profiles]\n{json.dumps(matches_context)}\n\n"
+                f"[Candidates (similarity matches + connections)]\n{json.dumps(matches_context)}\n\n"
                 f"[User Message]\n{message}"
             ),
         },

@@ -124,8 +124,75 @@ def _maybe_handle_matcha_relay_reply(user_id: str, message: str, db: DBSession) 
     return None
 
 
+def _build_relay_candidates(user_id: str, user_profile: dict, db: DBSession) -> list[dict]:
+    """
+    Build a unified candidate list for relay intent detection from:
+      1. Similarity matches stored in the user's matched_profiles JSONB column.
+      2. Accepted direct connections — so relay also works between connected users.
+    Deduplicates by profile_id.
+    """
+    from models import UserConnection, UserProfile as UP
+
+    candidates: dict[str, dict] = {}
+
+    # -- Source 1: similarity matches (top-3 stored from /perform_similarity) --
+    for match in user_profile.get("matched_profiles") or []:
+        pid = str(match.get("profile_id") or "")
+        if pid:
+            candidates[pid] = {
+                "profile_id": pid,
+                "user_id": str(match.get("user_id") or ""),
+                "name": match.get("name") or match.get("user") or "Unknown",
+                "source": "similarity",
+            }
+
+    # -- Source 2: accepted connections --
+    user_uuid = uuid.UUID(user_id)
+    connections = (
+        db.query(UserConnection)
+        .filter(
+            (UserConnection.requester_id == user_uuid) | (UserConnection.recipient_id == user_uuid),
+            UserConnection.status == "accepted",
+        )
+        .all()
+    )
+    for conn in connections:
+        # Determine the other party's user_id and their profile
+        other_user_id = conn.recipient_id if conn.requester_id == user_uuid else conn.requester_id
+        other_profile_id = conn.recipient_profile_id if conn.requester_id == user_uuid else conn.requester_profile_id
+
+        if not other_profile_id:
+            # Fall back to querying the latest profile for that user
+            profile_rec = (
+                db.query(UP)
+                .filter(UP.user_id == other_user_id)
+                .order_by(UP.created_at.desc())
+                .first()
+            )
+            if profile_rec:
+                other_profile_id = profile_rec.id
+                name = profile_rec.name or "Unknown"
+            else:
+                continue
+        else:
+            profile_rec = db.query(UP).filter(UP.id == other_profile_id).first()
+            name = profile_rec.name if profile_rec else "Unknown"
+
+        pid = str(other_profile_id)
+        if pid not in candidates:
+            candidates[pid] = {
+                "profile_id": pid,
+                "user_id": str(other_user_id),
+                "name": name or "Unknown",
+                "source": "connection",
+            }
+
+    return list(candidates.values())
+
+
 def _maybe_create_matcha_relay(user_id: str, message: str, db: DBSession, user_profile: dict) -> dict | None:
-    relay_intent = detect_relay_intent(user_id, message, user_profile.get("matched_profiles"))
+    candidates = _build_relay_candidates(user_id, user_profile, db)
+    relay_intent = detect_relay_intent(user_id, message, candidates)
     if relay_intent is None:
         return None
 
@@ -153,6 +220,7 @@ def _maybe_create_matcha_relay(user_id: str, message: str, db: DBSession, user_p
     }
 
 
+
 def send_message(user_id: str, message: str, db: DBSession, temporary: bool = False, history: list | None = None) -> dict:
     user_profile = _load_user_profile(user_id, db)
 
@@ -174,12 +242,13 @@ def send_message(user_id: str, message: str, db: DBSession, temporary: bool = Fa
             for ex in exchanges
         ]
 
-    relay_reply = None if temporary else _maybe_handle_matcha_relay_reply(user_id, message, db)
+    # Relay detection runs even in temp-chat — only *persistence* is skipped.
+    relay_reply = _maybe_handle_matcha_relay_reply(user_id, message, db)
     if relay_reply is not None:
         _persist_exchange(user_id, session_id, message, relay_reply, db, temporary)
         return {"response": relay_reply, "session_id": session_id}
 
-    relay_request = None if temporary else _maybe_create_matcha_relay(user_id, message, db, user_profile)
+    relay_request = _maybe_create_matcha_relay(user_id, message, db, user_profile)
     relay_notice = relay_request["notice"] if relay_request else None
     if relay_request and not relay_request.get("created"):
         _persist_exchange(user_id, session_id, message, relay_notice, db, temporary)
@@ -251,14 +320,15 @@ async def stream_message(
             for ex in exchanges
         ]
 
-    relay_reply = None if temporary else _maybe_handle_matcha_relay_reply(user_id, message, db)
+    # Relay detection runs even in temp-chat — only *persistence* is skipped.
+    relay_reply = _maybe_handle_matcha_relay_reply(user_id, message, db)
     if relay_reply is not None:
         _persist_exchange(user_id, session_id, message, relay_reply, db, temporary)
         yield f"data: {json.dumps(relay_reply)}\n\n"
         yield "data: [DONE]\n\n"
         return
 
-    relay_request = None if temporary else _maybe_create_matcha_relay(user_id, message, db, user_profile)
+    relay_request = _maybe_create_matcha_relay(user_id, message, db, user_profile)
     relay_notice = relay_request["notice"] if relay_request else None
     if relay_request and not relay_request.get("created"):
         _persist_exchange(user_id, session_id, message, relay_notice, db, temporary)
