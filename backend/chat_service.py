@@ -22,6 +22,7 @@ from matcha_relay_service import (
     build_chat_history_messages,
     create_relay_request,
     detect_relay_intent,
+    get_pending_relay_for_target,
 )
 from memory_manager import check_and_compress, get_active_window, get_or_create_session
 from memory_vector_store import retrieve_relevant_memories

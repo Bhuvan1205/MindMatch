@@ -1331,7 +1331,6 @@ async def chat_stream(
 def chat_end_session(
     request: Request,
     token: str | None = Query(default=None),
-    current_user: User | None = None,
     db: Session = Depends(get_db),
 ):
     """
