@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowRight, CheckCircle2, Loader2, RotateCcw, Send } from "lucide-react";
+import { ArrowRight, CheckCircle2, Loader2, RotateCcw, Send, Info } from "lucide-react";
 
 import { AppErrorState } from "@/components/feedback/app-error-state";
 import { InterviewProgress } from "@/components/interview/interview-progress";
@@ -25,6 +25,8 @@ export function InterviewFlow() {
   const router = useRouter();
   const profile = useProfileStore((s) => s.profile);
   const [answer, setAnswer] = React.useState("");
+  const [hasSeenIntro, setHasSeenIntro] = React.useState(false);
+  const [dismissedSectionIndex, setDismissedSectionIndex] = React.useState<number | null>(null);
 
   const handleTranscript = React.useCallback((text: string) => {
     setAnswer((prev) => prev + (prev ? " " : "") + text);
@@ -55,6 +57,12 @@ export function InterviewFlow() {
     currentQuestion,
     questionIndex,
     totalQuestions,
+    sectionName,
+    sectionIndex,
+    totalSections,
+    questionInSection,
+    totalInSection,
+    isNewSection,
     chatHistory,
     lastAgentMessage,
     setStarted,
@@ -103,6 +111,12 @@ export function InterviewFlow() {
       question: payload.question,
       questionIndex: payload.question_index,
       totalQuestions: payload.total_questions,
+      sectionName: payload.section_name,
+      sectionIndex: payload.section_index,
+      totalSections: payload.total_sections,
+      questionInSection: payload.question_in_section,
+      totalInSection: payload.total_in_section,
+      isNewSection: payload.is_new_section,
       message: payload.message,
     });
   }
@@ -123,6 +137,8 @@ export function InterviewFlow() {
   function handleRestart() {
     resetInterview();
     setAnswer("");
+    setHasSeenIntro(false);
+    setDismissedSectionIndex(null);
     startInterview.reset();
     respondToInterview.reset();
     startInterview.mutate();
@@ -147,15 +163,47 @@ export function InterviewFlow() {
   const isStarting = startInterview.isPending || (!currentQuestion && !startInterview.error);
   const isSubmitting = respondToInterview.isPending;
 
+  if (questionIndex >= 1 && !hasSeenIntro) {
+    return (
+      <InterviewIntroScreen
+        onContinue={() => setHasSeenIntro(true)}
+        totalQuestions={totalQuestions}
+      />
+    );
+  }
+
+  if (hasSeenIntro && isNewSection && sectionIndex !== dismissedSectionIndex) {
+    return (
+      <InterviewSectionTransition
+        sectionName={sectionName}
+        sectionIndex={sectionIndex}
+        totalSections={totalSections}
+        onContinue={() => setDismissedSectionIndex(sectionIndex)}
+      />
+    );
+  }
+
+  const isPreInterview = questionIndex === 0;
+  const displaySectionName = getSectionDisplayName(sectionName);
+  const interviewQuestionIndex = Math.max(0, questionIndex - 1);
+  const interviewTotalQuestions = Math.max(0, totalQuestions - 1);
+
   return (
     <section className="relative min-h-screen overflow-hidden px-5 py-8 sm:px-8 md:py-10">
       <div className="absolute inset-x-0 top-0 -z-10 h-80 bg-gradient-to-b from-primary/10 via-accent/10 to-transparent" />
       <div className="container flex min-h-[calc(100vh-9rem)] max-w-4xl flex-col">
-        <InterviewProgress
-          questionIndex={questionIndex}
-          totalQuestions={totalQuestions}
-          isLoading={isStarting}
-        />
+        {isPreInterview ? null : (
+          <InterviewProgress
+            questionIndex={interviewQuestionIndex}
+            totalQuestions={interviewTotalQuestions}
+            sectionName={displaySectionName}
+            sectionIndex={sectionIndex}
+            totalSections={totalSections}
+            questionInSection={questionInSection}
+            totalInSection={totalInSection}
+            isLoading={isStarting}
+          />
+        )}
 
         <motion.div
           variants={softReveal}
@@ -169,6 +217,8 @@ export function InterviewFlow() {
               agentMessage={lastAgentMessage}
               isLoading={isStarting}
               isSubmitting={isSubmitting}
+              label={isPreInterview ? "Getting to know you" : displaySectionName}
+              subtitle={isPreInterview ? "Before the interview begins" : "Interview companion"}
             />
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -241,4 +291,123 @@ function InterviewComplete({ onRestart }: { onRestart: () => void }) {
       </motion.div>
     </section>
   );
+}
+
+function InterviewIntroScreen({ onContinue, totalQuestions }: { onContinue: () => void; totalQuestions: number }) {
+  return (
+    <section className="relative min-h-screen overflow-hidden px-5 py-8 sm:px-8 md:py-10">
+      <div className="absolute inset-x-0 top-0 -z-10 h-80 bg-gradient-to-b from-primary/10 via-accent/10 to-transparent" />
+      <div className="container flex min-h-[calc(100vh-9rem)] max-w-4xl flex-col justify-center py-10">
+        <motion.div
+          variants={softReveal}
+          initial="initial"
+          animate="animate"
+          className="mx-auto w-full max-w-2xl rounded-xl border bg-card/78 p-8 shadow-soft backdrop-blur-xl md:p-10"
+        >
+          <div className="mb-6 flex size-12 items-center justify-center rounded-full bg-accent text-primary">
+            <Info className="size-6" />
+          </div>
+          <h1 className="text-3xl font-medium tracking-tight">Before we begin...</h1>
+          
+          <div className="mt-8 space-y-6 text-muted-foreground">
+            <p>
+              This interview consists of <strong>{Math.max(0, totalQuestions - 1)} questions</strong> designed to understand your unique learning style and cognitive patterns.
+            </p>
+            
+            <div className="space-y-2">
+              <h3 className="font-medium text-foreground">Traits we assess:</h3>
+              <ul className="ml-5 list-disc space-y-1">
+                <li>Problem Solving Approaches</li>
+                <li>Communication Preferences</li>
+                <li>Information Processing Styles</li>
+                <li>Teamwork and Collaboration Dynamics</li>
+              </ul>
+            </div>
+
+            <div className="rounded-lg bg-accent/50 p-4 text-sm">
+              <strong>Privacy & Personalization:</strong> The data extracted from this interview will be used to generate your cognitive profile. This allows us to provide personalized recommendations and match you with other compatible learners for a highly tailored experience.
+            </div>
+          </div>
+
+          <div className="mt-10 flex justify-end">
+            <Button onClick={onContinue} size="lg" className="w-full sm:w-auto">
+              Begin interview
+              <ArrowRight className="ml-2 size-4" />
+            </Button>
+          </div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+function InterviewSectionTransition({
+  sectionName,
+  sectionIndex,
+  totalSections,
+  onContinue,
+}: {
+  sectionName: string | null;
+  sectionIndex: number;
+  totalSections: number;
+  onContinue: () => void;
+}) {
+  const displayName = getSectionDisplayName(sectionName);
+  const description = getSectionDescription(sectionName);
+
+  return (
+    <section className="relative min-h-screen overflow-hidden px-5 py-8 sm:px-8 md:py-10">
+      <div className="absolute inset-x-0 top-0 -z-10 h-80 bg-gradient-to-b from-primary/10 via-accent/10 to-transparent" />
+      <div className="container flex min-h-[calc(100vh-9rem)] max-w-4xl flex-col justify-center py-10">
+        <motion.div
+          variants={softReveal}
+          initial="initial"
+          animate="animate"
+          className="mx-auto w-full max-w-2xl rounded-xl border bg-card/78 p-8 shadow-soft backdrop-blur-xl md:p-10"
+        >
+          <p className="text-sm font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            Section {sectionIndex + 1} of {totalSections}
+          </p>
+          <h1 className="mt-4 text-3xl font-medium tracking-tight">{displayName}</h1>
+          <p className="mt-4 max-w-xl leading-7 text-muted-foreground">{description}</p>
+
+          <div className="mt-10 flex justify-end">
+            <Button onClick={onContinue} size="lg" className="w-full sm:w-auto">
+              Continue
+              <ArrowRight className="ml-2 size-4" />
+            </Button>
+          </div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+function getSectionDisplayName(sectionName: string | null) {
+  if (sectionName === "Intro") {
+    return "Getting Oriented";
+  }
+
+  return sectionName ?? "Interview";
+}
+
+function getSectionDescription(sectionName: string | null) {
+  switch (sectionName) {
+    case "INTERESTS & CURIOSITY":
+      return "Now we’ll look at the ideas that naturally pull your attention and keep you curious.";
+    case "GOALS & DIRECTION":
+      return "Next, we’ll explore what you are moving toward and how you think about direction.";
+    case "LEARNING STYLE":
+      return "This section focuses on how you approach difficult ideas and build understanding.";
+    case "EXECUTION & PRODUCTIVITY":
+      return "Here we’ll look at how you turn ideas into action and what affects your momentum.";
+    case "COLLABORATION & SOCIAL STYLE":
+      return "Now we’ll explore the kinds of people and conversations that help you work well.";
+    case "PROBLEM-SOLVING & SELF-AWARENESS":
+      return "This section looks at how you respond to challenge, uncertainty, and reflection.";
+    case "CLOSING QUESTIONS":
+      return "We’re at the final stretch: a couple of questions about your ideal intellectual match.";
+    default:
+      return "We’ll begin with a little context about where you are right now.";
+  }
 }

@@ -32,6 +32,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { label: "Matches",       href: "/matches",        icon: Users2,         match: "/matches" },
+  { label: "Connections",   href: "/connections",    icon: MessageSquare,  match: "/connections" },
   { label: "Matcha",        href: "/chat",           icon: MessageSquare,  match: "/chat" },
   { label: "Profile",       href: "/profile/preview", icon: UserCircle2,   match: "/profile" },
 ];

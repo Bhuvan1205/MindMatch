@@ -16,6 +16,13 @@ import type {
   ChatSendResponse,
   ChatHistoryResponse,
   ChatEndResponse,
+  ConnectionActionRequest,
+  ConnectionRequest,
+  DirectMessageRequest,
+  DirectMessageThreadResponse,
+  ExperienceAskRequest,
+  ExperienceAskResponse,
+  UserConnection,
 } from "@/lib/api/types";
 
 export const mindmatchApi = {
@@ -84,6 +91,43 @@ export const mindmatchApi = {
   chatEndSession() {
     return apiRequest<ChatEndResponse>("/chat/end-session", {
       method: "POST",
+    });
+  },
+
+  // Direct interaction
+  requestConnection(body: ConnectionRequest) {
+    return apiRequest<UserConnection>("/connections/request", {
+      method: "POST",
+      body,
+    });
+  },
+
+  listConnections() {
+    return apiRequest<{ connections: UserConnection[] }>("/connections");
+  },
+
+  acceptConnection(body: ConnectionActionRequest) {
+    return apiRequest<UserConnection>("/connections/accept", {
+      method: "POST",
+      body,
+    });
+  },
+
+  sendDirectMessage(body: DirectMessageRequest) {
+    return apiRequest<DirectMessageThreadResponse["messages"][number]>("/direct-messages/send", {
+      method: "POST",
+      body,
+    });
+  },
+
+  getDirectMessages(connectionId: string) {
+    return apiRequest<DirectMessageThreadResponse>(`/direct-messages/${connectionId}`);
+  },
+
+  askExperience(body: ExperienceAskRequest) {
+    return apiRequest<ExperienceAskResponse>("/experience/ask", {
+      method: "POST",
+      body,
     });
   },
 };

@@ -4,10 +4,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 export function InterviewProgress({
   questionIndex,
   totalQuestions,
+  sectionName,
+  sectionIndex,
+  totalSections,
+  questionInSection,
+  totalInSection,
   isLoading,
 }: {
   questionIndex: number;
   totalQuestions: number;
+  sectionName: string | null;
+  sectionIndex: number;
+  totalSections: number;
+  questionInSection: number;
+  totalInSection: number;
   isLoading: boolean;
 }) {
   const progress = totalQuestions > 0 ? ((questionIndex + 1) / totalQuestions) * 100 : 0;
@@ -22,9 +32,13 @@ export function InterviewProgress({
       ) : (
         <div className="space-y-3">
           <Progress value={progress} />
-          <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            <span aria-live="polite">Question {questionIndex + 1}</span>
-            <span>{totalQuestions} total</span>
+          <div className="flex flex-col gap-1 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span aria-live="polite">
+              {sectionName ?? "Interview"} · Question {questionInSection + 1} of {totalInSection}
+            </span>
+            <span>
+              Section {sectionIndex + 1} of {totalSections} · Question {questionIndex + 1} of {totalQuestions}
+            </span>
           </div>
         </div>
       )}

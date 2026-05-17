@@ -1,13 +1,13 @@
 """
 memory_vector_store.py
 ======================
-Handles all ChromaDB interactions for episodic memory summaries.
+Handles all Pinecone interactions for episodic memory summaries.
 
-This is a SEPARATE ChromaDB collection from 'user_profiles'.
-Collection: 'episodic_memories'
+This uses a separate Pinecone index from profile embeddings.
+Index purpose: episodic memories
 
 Document ID convention:
-    ChromaDB document ID == PostgreSQL EpisodicMemory.id (UUID string)
+    Pinecone record ID == PostgreSQL EpisodicMemory.id (UUID string)
     This keeps both stores in sync — same pattern as user_profiles / vector_store.py.
 
 Embedding model:
@@ -33,12 +33,12 @@ def store_memory_embedding(
 ) -> None:
     """
     Encode the memory summary text and upsert it into the episodic_memories
-    ChromaDB collection.
+    Pinecone index.
 
     Parameters
     ----------
     memory_id : str
-        UUID of the EpisodicMemory PostgreSQL row. Used as the ChromaDB doc ID.
+        UUID of the EpisodicMemory PostgreSQL row. Used as the Pinecone record ID.
     user_id : str
         UUID of the owning user. Stored in metadata for filtered retrieval.
     summary_text : str
@@ -112,7 +112,7 @@ def retrieve_relevant_memories(
                 docs.append(match.metadata["text"])
         return docs
     except Exception as e:
-        # If no memories exist yet, ChromaDB may raise — degrade gracefully
+        # If no memories exist yet, Pinecone may raise — degrade gracefully
         logger.warning(
             "memory_vector_store: retrieval failed for user=%s — %s", user_id, e
         )

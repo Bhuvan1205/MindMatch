@@ -10,7 +10,7 @@ import { AppNavbar } from "@/components/layout/app-navbar";
 import { Button } from "@/components/ui/button";
 
 // Routes that should use the app layout
-const APP_ROUTE_PREFIXES = ["/profile", "/matches", "/llm-features", "/chat"];
+const APP_ROUTE_PREFIXES = ["/profile", "/matches", "/connections", "/llm-features", "/chat"];
 
 function MarketingNavbar() {
   const { resolvedTheme, setTheme } = useTheme();

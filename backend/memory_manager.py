@@ -7,7 +7,7 @@ Responsibilities:
   - Retrieve the rolling active conversation window from PostgreSQL.
   - Check if the exchange threshold has been reached.
   - When threshold is reached: summarize → persist EpisodicMemory →
-    embed in ChromaDB → clear active window → roll to new session_id.
+    embed in Pinecone → clear active window → roll to new session_id.
   - Provide/create the current active session_id for a user.
 
 The threshold is configurable via the CHAT_MEMORY_THRESHOLD env var (default: 12).
@@ -155,7 +155,7 @@ def check_and_compress(user_id: str, session_id: str, db: DBSession) -> str:
         logger.error("memory_manager: failed to persist EpisodicMemory — %s", e)
         return session_id
 
-    # 3. Embed and store in ChromaDB
+    # 3. Embed and store in Pinecone
     try:
         store_memory_embedding(
             memory_id=str(memory_record.id),
@@ -163,7 +163,7 @@ def check_and_compress(user_id: str, session_id: str, db: DBSession) -> str:
             summary_text=summary_text,
         )
     except Exception as e:
-        logger.error("memory_manager: ChromaDB storage failed — %s", e)
+        logger.error("memory_manager: Pinecone storage failed — %s", e)
         # Non-fatal: SQL record exists; retrieval will miss this one until fixed.
 
     # 4. Roll to a new session (clears active window implicitly via new session_id)

@@ -36,7 +36,7 @@ from web_search import route_query, perform_web_search
 logger = logging.getLogger(__name__)
 
 # ── Singleton LLM ─────────────────────────────────────────────────────────────
-_chat_model = ChatOpenAI(model="gpt-4.1-mini")
+_chat_model = ChatOpenAI(model="gpt-4o-mini")
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

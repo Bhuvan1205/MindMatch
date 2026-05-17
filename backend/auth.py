@@ -44,15 +44,28 @@ GOOGLE_CLIENT_ID             = os.getenv("GOOGLE_CLIENT_ID", "")
 # PASSWORD HASHING
 # =========================================================
 
+import hashlib
+
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+def normalize_password(password: str) -> str:
+    if not password:
+        raise ValueError("Password cannot be empty")
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 def hash_password(plain: str) -> str:
-    return _pwd_context.hash(plain)
-
+    return _pwd_context.hash(normalize_password(plain))
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    try:
+        # First try the new pre-hashed format
+        if _pwd_context.verify(normalize_password(plain), hashed):
+            return True
+        # Fallback to legacy raw bcrypt verification
+        return _pwd_context.verify(plain, hashed)
+    except Exception as e:
+        logger.warning(f"Auth verification failure: {str(e)}")
+        return False
 
 
 # =========================================================

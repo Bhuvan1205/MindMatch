@@ -9,7 +9,7 @@ AI-powered cognitive compatibility matching platform.
 | Frontend | Next.js 15, TypeScript, Tailwind CSS |
 | Backend  | FastAPI (Python)             |
 | Database | PostgreSQL (Supabase)        |
-| Vectors  | ChromaDB                     |
+| Vectors  | Pinecone                      |
 | AI       | OpenAI GPT-4o + MiniLM embeddings |
 
 ## Local Development
@@ -47,7 +47,9 @@ npm run dev
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Token expiry (default: `10080`) |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `ALLOWED_ORIGINS` | Comma-separated allowed CORS origins (defaults to `*` in dev) |
-| `CHROMA_MODE` | `ephemeral` for in-memory ChromaDB (Render), omit for local persistent |
+| `PINECONE_API_KEY` | Pinecone API key |
+| `PINECONE_INDEX_NAME` | Pinecone index used for user profile embeddings |
+| `PINECONE_MEMORY_INDEX_NAME` | Pinecone index used for episodic memories |
 
 ### Frontend (`.env.local`)
 

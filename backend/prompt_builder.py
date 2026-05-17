@@ -73,7 +73,7 @@ def build_prompt(
     retrieved_memories : list[str] | None
         Top-k episodic memory summaries retrieved for this query. Optional.
     retrieved_similar_profiles : list[dict] | None
-        Top-k similar user profiles from ChromaDB. Optional, future use.
+        Top-k similar user profiles from Pinecone. Optional, future use.
     web_context : list[dict] | None
         Optional web search results retrieved by duckduckgo-search.
 

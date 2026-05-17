@@ -1,7 +1,7 @@
 """
 vector_store.py
 ===============
-Handles all interactions with the ChromaDB vector database.
+Handles all interactions with the Pinecone vector database.
 
 Vectors from generate_embeddings() are concatenated in a strict,
 fixed category order before being stored.  This order is the single
@@ -16,13 +16,8 @@ Concatenation order (mirrors CATEGORY_MAP in embedding_generator.py):
 Dimension per category : 384  (all-MiniLM-L6-v2)
 Total concatenated dim  : 384 × 6 = 2304
 
-The ChromaDB collection is persisted at:
-    <project_root>/chroma_db/
-which is the same path `./chroma_db` that the notebook uses when
-run from the project root, keeping both in sync.
-
-The document ID used in ChromaDB is the PostgreSQL `profile_id` UUID
-string so the two stores are always aligned and cross-queryable.
+The Pinecone record ID is the PostgreSQL `profile_id` UUID string so
+the relational store and vector store stay aligned and cross-queryable.
 """
 
 from __future__ import annotations
@@ -61,15 +56,15 @@ def store_profile_embedding(
 ) -> None:
     """
     Concatenate the 6 per-category vectors and upsert the resulting
-    2304-dim vector into ChromaDB.
+    2304-dim vector into Pinecone.
 
     Parameters
     ----------
     profile_id : str
         UUID string of the UserProfile record in PostgreSQL.
-        Used as the ChromaDB document ID so both stores stay in sync.
+        Used as the Pinecone record ID so both stores stay in sync.
     name : str | None
-        User's name, stored in ChromaDB metadata for readability.
+        User's name, stored in Pinecone metadata for readability.
     embeddings : dict[str, list[float]]
         Output of ``generate_embeddings()``.  Must contain all six
         category keys listed in EMBEDDING_ORDER.
@@ -108,7 +103,7 @@ def store_profile_embedding(
     if not combined:
         raise ValueError(
             f"No embedding vectors found for profile '{profile_id}'. "
-            "Cannot store an empty vector in ChromaDB."
+            "Cannot store an empty vector in Pinecone."
         )
 
     index.upsert([{
@@ -121,7 +116,7 @@ def store_profile_embedding(
     }])
 
     logger.info(
-        "Stored ChromaDB embedding for '%s' (id=%s) — dim: %d / %d",
+        "Stored Pinecone embedding for '%s' (id=%s) — dim: %d / %d",
         name,
         profile_id,
         len(combined),
@@ -135,7 +130,7 @@ def store_profile_embedding(
 
 def perform_similarity(user_id: str) -> tuple[list[str], list[float]]:
     """
-    Find the most similar users to the given user_id using ChromaDB.
+    Find the most similar users to the given user_id using Pinecone.
 
     The function fetches the stored embedding for ``user_id``, queries
     the collection for the top-N nearest neighbours (n_results=11 to
@@ -145,7 +140,7 @@ def perform_similarity(user_id: str) -> tuple[list[str], list[float]]:
     Parameters
     ----------
     user_id : str
-        The ChromaDB document ID (== PostgreSQL profile UUID) of the
+        The Pinecone record ID (== PostgreSQL profile UUID) of the
         user whose similar matches we want to find.
 
     Returns

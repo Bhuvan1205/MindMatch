@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertCircle, ArrowLeft, ArrowRight, Loader2, RefreshCw, Search, type LucideIcon } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, Loader2, MessageCircle, RefreshCw, Search, type LucideIcon } from "lucide-react";
 
 import { EmptyState } from "@/components/feedback/empty-state";
 import { ScoreRing } from "@/components/matches/score-ring";
@@ -30,7 +30,7 @@ export function MatchesScreen() {
       setMatches(response);
       return response;
     },
-    enabled: Boolean(profile),
+    enabled: false,
     retry: 1,
   });
 
@@ -54,7 +54,7 @@ export function MatchesScreen() {
     );
   }
 
-  if (matchesQuery.isPending) {
+  if (matchesQuery.isFetching) {
     return (
       <MatchesShell>
         <div className="mx-auto max-w-md rounded-lg border bg-card/78 p-8 text-center shadow-soft backdrop-blur-xl">
@@ -94,12 +94,12 @@ export function MatchesScreen() {
       <MatchesShell>
         <EmptyPanel
           icon={Search}
-          title="No matches returned"
-          description="We couldn't find any matches at this time."
+          title={matches ? "No matches returned" : "Ready to find matches"}
+          description={matches ? "We couldn't find any matches at this time." : "Click below to find compatible learners based on your profile."}
           action={
-            <Button type="button" variant="secondary" onClick={() => matchesQuery.refetch()}>
-              <RefreshCw className="size-4" />
-              Run again
+            <Button type="button" onClick={() => matchesQuery.refetch()} disabled={matchesQuery.isFetching}>
+              <RefreshCw className={`mr-2 size-4 ${matchesQuery.isFetching ? 'animate-spin' : ''}`} />
+              {matches ? "Run again" : "Find matches"}
             </Button>
           }
         />
@@ -117,7 +117,15 @@ export function MatchesScreen() {
           <h1 className="mt-3 text-pretty text-3xl font-medium tracking-tight sm:text-4xl">
             People likely to think well with <span className="capitalize">{data?.query_user || profile.name || "you"}</span>
           </h1>
+          <p className="mt-4 text-muted-foreground">
             We&apos;ve found people who share your goals, learning strategies, and cognitive patterns.
+          </p>
+          <div className="mt-6 flex justify-center">
+            <Button onClick={() => matchesQuery.refetch()} disabled={matchesQuery.isFetching} variant="outline" className="rounded-full px-6">
+              <RefreshCw className={`mr-2 size-4 ${matchesQuery.isFetching ? 'animate-spin' : ''}`} />
+              Find new matches
+            </Button>
+          </div>
         </motion.div>
 
         <motion.div variants={staggerContainer} className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -131,6 +139,16 @@ export function MatchesScreen() {
 }
 
 function MatchCard({ match, index }: { match: RankedMatch; index: number }) {
+  const targetProfileId = match.profile.profile_id;
+  const connectionMutation = useMutation({
+    mutationFn: () => {
+      if (!targetProfileId) {
+        throw new Error("This match is missing a profile id.");
+      }
+      return mindmatchApi.requestConnection({ target_profile_id: targetProfileId });
+    },
+  });
+
   return (
     <motion.article
       variants={softReveal}
@@ -150,12 +168,31 @@ function MatchCard({ match, index }: { match: RankedMatch; index: number }) {
 
       <p className="mt-5 line-clamp-4 flex-1 text-sm leading-6 text-muted-foreground">{match.reason}</p>
 
-      <Button asChild variant="secondary" className="mt-5 w-full">
+      <div className="mt-5 grid gap-2">
+      <Button asChild variant="secondary" className="w-full">
         <Link href={`/matches/${index}`}>
           View details
           <ArrowRight className="size-4" />
         </Link>
       </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          disabled={!targetProfileId || connectionMutation.isPending}
+          onClick={() => connectionMutation.mutate()}
+        >
+          {connectionMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <MessageCircle className="size-4" />}
+          {connectionMutation.data
+            ? connectionMutation.data.status === "accepted"
+              ? "Connected"
+              : "Request sent"
+            : "Request chat"}
+        </Button>
+      </div>
+      <p className="mt-3 text-xs leading-5 text-muted-foreground">
+        Requests use this match profile to ask for direct interaction.
+      </p>
     </motion.article>
   );
 }

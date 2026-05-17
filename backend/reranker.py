@@ -1,11 +1,11 @@
 """
 reranker.py
 ===========
-Two-stage pipeline that runs after the ChromaDB vector similarity search:
+Two-stage pipeline that runs after the Pinecone vector similarity search:
 
 Stage 1 — Profile Retrieval (fetch_candidate_profiles)
     Pulls full UserProfile records from PostgreSQL for the top-K candidate
-    UUIDs returned by ChromaDB.  Returns a dict keyed by name, mirroring
+    UUIDs returned by Pinecone.  Returns a dict keyed by name, mirroring
     the structure used in the notebook.
 
 Stage 2 — LLM Reranking + Explicit Filter (rerank_candidates)
@@ -70,6 +70,8 @@ _reranker_model = ChatOpenAI(model="gpt-4.1-mini", temperature=0)
 def _profile_to_dict(record: UserProfile) -> dict:
     """Return a JSON-serialisable dict of the 6 profile category fields."""
     return {
+        "profile_id":                 str(record.id),
+        "user_id":                    str(record.user_id) if record.user_id else None,
         "name":                      record.name,
         "interests":                 record.interests or [],
         "goals":                     record.goals or [],
@@ -94,7 +96,7 @@ def fetch_candidate_profiles(
     Parameters
     ----------
     user_ids : list[str]
-        PostgreSQL profile UUID strings (== ChromaDB document IDs).
+        PostgreSQL profile UUID strings (== Pinecone record IDs).
     db : Session
         Active SQLAlchemy session (injected by FastAPI's Depends(get_db)).
 

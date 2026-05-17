@@ -53,7 +53,7 @@ class UserProfile(Base):
     name       = Column(String, nullable=True)
 
     # ── Raw profile features (text lists from LLM extraction) ──
-    # Embeddings are NOT stored here — they live in ChromaDB.
+    # Embeddings are NOT stored here — they live in Pinecone.
     interests                   = Column(JSONB, nullable=True)
     goals                       = Column(JSONB, nullable=True)
     learning_preferences        = Column(JSONB, nullable=True)
@@ -109,7 +109,7 @@ class ConversationExchange(Base):
 # =========================================================
 # EPISODIC MEMORY TABLE
 # Stores compressed long-term memory summaries.
-# The row ID doubles as the ChromaDB document ID in the
+# The row ID doubles as the Pinecone record ID in the
 # 'episodic_memories' collection.
 # =========================================================
 
@@ -125,9 +125,69 @@ class EpisodicMemory(Base):
     # The session that was compressed to produce this memory
     session_id     = Column(UUID(as_uuid=True), nullable=False)
 
-    # 2–4 sentence durable memory (also stored in ChromaDB for semantic retrieval)
+    # 2–4 sentence durable memory (also stored in Pinecone for semantic retrieval)
     memory_summary = Column(Text, nullable=False)
 
     # "episodic" by default — extensible for future memory types
     memory_type    = Column(String, default="episodic", nullable=False)
 
+
+# =========================================================
+# USER CONNECTION TABLE
+# Tracks direct interaction permissions between matched users.
+# =========================================================
+
+class UserConnection(Base):
+    __tablename__ = "user_connections"
+
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    requester_id   = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    recipient_id   = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+
+    requester_profile_id = Column(UUID(as_uuid=True), ForeignKey("user_profiles.id"), nullable=True)
+    recipient_profile_id = Column(UUID(as_uuid=True), ForeignKey("user_profiles.id"), nullable=True)
+
+    # pending | accepted | declined | blocked
+    status         = Column(String, default="pending", nullable=False)
+
+
+# =========================================================
+# DIRECT MESSAGE TABLE
+# Stores user-to-user messages once a connection is accepted.
+# =========================================================
+
+class DirectMessage(Base):
+    __tablename__ = "direct_messages"
+
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+    connection_id  = Column(UUID(as_uuid=True), ForeignKey("user_connections.id"), nullable=False)
+    sender_id      = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    receiver_id    = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+
+    message        = Column(Text, nullable=False)
+    read_at        = Column(DateTime, nullable=True)
+
+
+# =========================================================
+# EXPERIENCE ROUTING LOG
+# Audit trail for LLM-mediated advice using another user's stored experience.
+# =========================================================
+
+class ExperienceRoutingLog(Base):
+    __tablename__ = "experience_routing_logs"
+
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+    asker_id       = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    target_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    target_profile_id = Column(UUID(as_uuid=True), ForeignKey("user_profiles.id"), nullable=False)
+
+    query          = Column(Text, nullable=False)
+    response       = Column(Text, nullable=False)
+    context_metadata = Column(JSONB, nullable=True)

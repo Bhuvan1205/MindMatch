@@ -38,6 +38,12 @@ export type StartInterviewResponse = {
   question: string;
   question_index: number;
   total_questions: number;
+  section_name: string;
+  section_index: number;
+  total_sections: number;
+  question_in_section: number;
+  total_in_section: number;
+  is_new_section: boolean;
 };
 
 export type RespondInterviewRequest = {
@@ -52,6 +58,12 @@ export type RespondInterviewResponse = {
   question_index: number | null;
   total_questions: number;
   chat_history: ChatHistory | null;
+  section_name: string | null;
+  section_index: number | null;
+  total_sections: number;
+  question_in_section: number | null;
+  total_in_section: number | null;
+  is_new_section: boolean;
 };
 
 export type ExtractProfileRequest = {
@@ -81,7 +93,10 @@ export type RankedMatch = {
   user: string;
   score: number;
   reason: string;
-  profile: CognitiveProfile;
+  profile: CognitiveProfile & {
+    profile_id?: string;
+    user_id?: string | null;
+  };
 };
 
 export type SimilarityResponse = {
@@ -121,3 +136,62 @@ export type ChatEndResponse = {
   summary: string | null;
 };
 
+// Connections / direct messages
+export type ConnectionStatus = "pending" | "accepted" | "declined" | "blocked";
+
+export type UserConnection = {
+  connection_id: string;
+  requester_id: string;
+  recipient_id: string;
+  requester_profile_id: string | null;
+  recipient_profile_id: string | null;
+  status: ConnectionStatus;
+  created_at: string;
+  updated_at: string;
+  is_incoming: boolean;
+};
+
+export type ConnectionRequest = {
+  target_profile_id: string;
+};
+
+export type ConnectionActionRequest = {
+  connection_id: string;
+};
+
+export type DirectMessage = {
+  message_id: string;
+  connection_id?: string;
+  sender_id: string;
+  receiver_id: string;
+  message: string;
+  created_at: string;
+  read_at?: string | null;
+};
+
+export type DirectMessageRequest = {
+  connection_id: string;
+  message: string;
+};
+
+export type DirectMessageThreadResponse = {
+  connection: UserConnection;
+  messages: DirectMessage[];
+};
+
+export type ExperienceAskRequest = {
+  target_profile_id: string;
+  question: string;
+};
+
+export type ExperienceAskResponse = {
+  target_user: CognitiveProfile & {
+    profile_id?: string;
+    user_id?: string | null;
+  };
+  answer: string;
+  context_summary: {
+    memory_count: number;
+    recent_exchange_count: number;
+  };
+};

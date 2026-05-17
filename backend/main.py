@@ -26,7 +26,7 @@ from auth import (
     get_current_user,
 )
 from database import engine, get_db
-from models import Base, User, UserProfile
+from models import Base, DirectMessage, User, UserConnection, UserProfile, ExperienceRoutingLog, ChatSession, ConversationExchange, EpisodicMemory
 
 app = FastAPI()
 
@@ -67,6 +67,44 @@ sessions: dict = {}
 
 # Flatten question bank into a single ordered list (preserves category order)
 ALL_QUESTIONS = [q for questions in interview_questions.values() for q in questions]
+SECTION_ENTRIES = list(interview_questions.items())
+
+
+def get_question_metadata(question_index: int) -> dict:
+    """
+    Returns section metadata for a flattened question index.
+    The very first question is a pre-interview name capture, so actual
+    interview progress starts from flattened index 1.
+    """
+    running_index = 0
+
+    for raw_section_index, (section_name, questions) in enumerate(SECTION_ENTRIES):
+        section_start = running_index
+        section_end = running_index + len(questions)
+
+        if section_start <= question_index < section_end:
+            question_in_section = question_index - section_start
+
+            # The first "Intro" question is intentionally pre-interview.
+            if raw_section_index == 0:
+                interview_question_in_section = max(0, question_in_section - 1)
+                interview_total_in_section = max(0, len(questions) - 1)
+            else:
+                interview_question_in_section = question_in_section
+                interview_total_in_section = len(questions)
+
+            return {
+                "section_name": section_name,
+                "section_index": raw_section_index,
+                "total_sections": len(SECTION_ENTRIES),
+                "question_in_section": interview_question_in_section,
+                "total_in_section": interview_total_in_section,
+                "is_new_section": question_in_section == 0 and question_index != 0,
+            }
+
+        running_index = section_end
+
+    raise IndexError(f"Question index out of range: {question_index}")
 
 # =========================================================
 # REQUEST / RESPONSE MODELS
@@ -77,6 +115,12 @@ class StartResponse(BaseModel):
     question: str
     question_index: int
     total_questions: int
+    section_name: str
+    section_index: int
+    total_sections: int
+    question_in_section: int
+    total_in_section: int
+    is_new_section: bool
 
 
 class RespondRequest(BaseModel):
@@ -91,6 +135,12 @@ class RespondResponse(BaseModel):
     question_index: int | None
     total_questions: int
     chat_history: dict | None   # only populated when status == "done"
+    section_name: str | None
+    section_index: int | None
+    total_sections: int
+    question_in_section: int | None
+    total_in_section: int | None
+    is_new_section: bool
 
 
 class ExtractProfileRequest(BaseModel):
@@ -98,7 +148,7 @@ class ExtractProfileRequest(BaseModel):
 
 
 class SimilarityRequest(BaseModel):
-    user_id: str                # ChromaDB / PostgreSQL profile UUID to find matches for
+    user_id: str                # Pinecone / PostgreSQL profile UUID to find matches for
 
 
 class RegisterRequest(BaseModel):
@@ -256,11 +306,13 @@ def start_interview():
         "chat_history": {},
         "last_answer": "",
     }
+    metadata = get_question_metadata(0)
     return StartResponse(
         session_id=session_id,
         question=ALL_QUESTIONS[0],
         question_index=0,
         total_questions=len(ALL_QUESTIONS),
+        **metadata,
     )
 
 
@@ -300,6 +352,7 @@ def respond_to_interview(body: RespondRequest):
             question_index=idx,
             total_questions=len(ALL_QUESTIONS),
             chat_history=None,
+            **get_question_metadata(idx),
         )
 
     validation_status = response_data.get("status", "RETRY")
@@ -323,6 +376,12 @@ def respond_to_interview(body: RespondRequest):
                 question_index=None,
                 total_questions=len(ALL_QUESTIONS),
                 chat_history=result,
+                section_name=None,
+                section_index=None,
+                total_sections=len(SECTION_ENTRIES),
+                question_in_section=None,
+                total_in_section=None,
+                is_new_section=False,
             )
 
         state["current_index"] = next_idx
@@ -335,6 +394,7 @@ def respond_to_interview(body: RespondRequest):
             question_index=next_idx,
             total_questions=len(ALL_QUESTIONS),
             chat_history=None,
+            **get_question_metadata(next_idx),
         )
 
     # =========================================
@@ -361,6 +421,12 @@ def respond_to_interview(body: RespondRequest):
                 question_index=None,
                 total_questions=len(ALL_QUESTIONS),
                 chat_history=result,
+                section_name=None,
+                section_index=None,
+                total_sections=len(SECTION_ENTRIES),
+                question_in_section=None,
+                total_in_section=None,
+                is_new_section=False,
             )
 
         state["current_index"] = next_idx
@@ -371,6 +437,7 @@ def respond_to_interview(body: RespondRequest):
             question_index=next_idx,
             total_questions=len(ALL_QUESTIONS),
             chat_history=None,
+            **get_question_metadata(next_idx),
         )
 
     return RespondResponse(
@@ -380,6 +447,7 @@ def respond_to_interview(body: RespondRequest):
         question_index=idx,
         total_questions=len(ALL_QUESTIONS),
         chat_history=None,
+        **get_question_metadata(idx),
     )
 
 
@@ -448,7 +516,7 @@ def extract_profile_endpoint(
         )
 
     # =========================================
-    # STEP 4 — Generate embeddings + store in ChromaDB
+    # STEP 4 — Generate embeddings + store in Pinecone
     # =========================================
 
     try:
@@ -512,7 +580,7 @@ def perform_similarity_endpoint(body: SimilarityRequest, db: Session = Depends(g
     """
     Two-stage matching pipeline for the given profile UUID.
 
-    Stage 1 — Vector search (ChromaDB)
+    Stage 1 — Vector search (Pinecone)
         Retrieves the top-10 most embedding-similar user IDs.
 
     Stage 2 — LLM Reranking + Explicit Filter (reranker.py)
@@ -538,7 +606,7 @@ def perform_similarity_endpoint(body: SimilarityRequest, db: Session = Depends(g
     """
     import uuid as _uuid
 
-    # ── Stage 1: ChromaDB vector similarity (top-10) ──────────────────────
+    # ── Stage 1: Pinecone vector similarity (top-10) ──────────────────────
     try:
         candidate_ids, _ = perform_similarity(body.user_id)
     except ValueError as e:
@@ -592,10 +660,14 @@ def perform_similarity_endpoint(body: SimilarityRequest, db: Session = Depends(g
         # Persist top-3 matches for future chat context
         top_matches = []
         for match in reranked.get("ranked_matches", [])[:3]:
+            profile = match.get("profile") or {}
             top_matches.append({
+                "profile_id": profile.get("profile_id"),
+                "user_id": profile.get("user_id"),
                 "name":   match.get("user"),
                 "score":  match.get("score"),
-                "reason": match.get("reason")
+                "reason": match.get("reason"),
+                "profile": profile,
             })
         
         query_record.matched_profiles = top_matches
@@ -618,6 +690,246 @@ def perform_similarity_endpoint(body: SimilarityRequest, db: Session = Depends(g
 # ─────────────────────────────────────────────────────────
 # CHAT
 # ─────────────────────────────────────────────────────────
+
+# =========================================================
+# CONNECTION REQUEST / RESPONSE MODELS
+# =========================================================
+
+class ConnectionRequest(BaseModel):
+    target_profile_id: str
+
+
+class ConnectionActionRequest(BaseModel):
+    connection_id: str
+
+
+class DirectMessageRequest(BaseModel):
+    connection_id: str
+    message: str
+
+
+class ExperienceAskRequest(BaseModel):
+    target_profile_id: str
+    question: str
+
+
+# =========================================================
+# CONNECTIONS + DIRECT MESSAGES + EXPERIENCE ROUTING
+# =========================================================
+
+def _serialize_connection(connection: UserConnection, current_user_id: str) -> dict:
+    return {
+        "connection_id": str(connection.id),
+        "requester_id": str(connection.requester_id),
+        "recipient_id": str(connection.recipient_id),
+        "requester_profile_id": str(connection.requester_profile_id) if connection.requester_profile_id else None,
+        "recipient_profile_id": str(connection.recipient_profile_id) if connection.recipient_profile_id else None,
+        "status": connection.status,
+        "created_at": connection.created_at.isoformat(),
+        "updated_at": connection.updated_at.isoformat(),
+        "is_incoming": str(connection.recipient_id) == current_user_id,
+    }
+
+
+@app.post('/connections/request')
+def request_connection(
+    body: ConnectionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    import uuid as _uuid
+
+    target_profile = db.query(UserProfile).filter(UserProfile.id == _uuid.UUID(body.target_profile_id)).first()
+    if target_profile is None or target_profile.user_id is None:
+        raise HTTPException(status_code=404, detail="Target matched user is not available for direct interaction.")
+    if target_profile.user_id == current_user.id:
+        raise HTTPException(status_code=422, detail="You cannot request a connection with yourself.")
+
+    requester_profile = (
+        db.query(UserProfile)
+        .filter(UserProfile.user_id == current_user.id)
+        .order_by(UserProfile.created_at.desc())
+        .first()
+    )
+
+    existing = (
+        db.query(UserConnection)
+        .filter(
+            ((UserConnection.requester_id == current_user.id) & (UserConnection.recipient_id == target_profile.user_id))
+            | ((UserConnection.requester_id == target_profile.user_id) & (UserConnection.recipient_id == current_user.id))
+        )
+        .order_by(UserConnection.created_at.desc())
+        .first()
+    )
+    if existing:
+        return _serialize_connection(existing, str(current_user.id))
+
+    connection = UserConnection(
+        requester_id=current_user.id,
+        recipient_id=target_profile.user_id,
+        requester_profile_id=requester_profile.id if requester_profile else None,
+        recipient_profile_id=target_profile.id,
+        status="pending",
+    )
+    db.add(connection)
+    db.commit()
+    db.refresh(connection)
+    return _serialize_connection(connection, str(current_user.id))
+
+
+@app.get('/connections')
+def list_connections(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    connections = (
+        db.query(UserConnection)
+        .filter(
+            (UserConnection.requester_id == current_user.id)
+            | (UserConnection.recipient_id == current_user.id)
+        )
+        .order_by(UserConnection.updated_at.desc())
+        .all()
+    )
+    return {"connections": [_serialize_connection(c, str(current_user.id)) for c in connections]}
+
+
+@app.post('/connections/accept')
+def accept_connection(
+    body: ConnectionActionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    import uuid as _uuid
+
+    connection = db.query(UserConnection).filter(UserConnection.id == _uuid.UUID(body.connection_id)).first()
+    if connection is None:
+        raise HTTPException(status_code=404, detail="Connection request not found.")
+    if connection.recipient_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the recipient can accept this connection.")
+
+    connection.status = "accepted"
+    db.commit()
+    db.refresh(connection)
+    return _serialize_connection(connection, str(current_user.id))
+
+
+@app.post('/direct-messages/send')
+def send_direct_message(
+    body: DirectMessageRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    import uuid as _uuid
+
+    if not body.message.strip():
+        raise HTTPException(status_code=422, detail="Message cannot be empty.")
+
+    connection = db.query(UserConnection).filter(UserConnection.id == _uuid.UUID(body.connection_id)).first()
+    if connection is None or connection.status != "accepted":
+        raise HTTPException(status_code=403, detail="Direct messages require an accepted connection.")
+    if current_user.id not in {connection.requester_id, connection.recipient_id}:
+        raise HTTPException(status_code=403, detail="You are not part of this connection.")
+
+    receiver_id = connection.recipient_id if current_user.id == connection.requester_id else connection.requester_id
+    message = DirectMessage(
+        connection_id=connection.id,
+        sender_id=current_user.id,
+        receiver_id=receiver_id,
+        message=body.message.strip(),
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+
+    return {
+        "message_id": str(message.id),
+        "connection_id": str(message.connection_id),
+        "sender_id": str(message.sender_id),
+        "receiver_id": str(message.receiver_id),
+        "message": message.message,
+        "created_at": message.created_at.isoformat(),
+    }
+
+
+@app.get('/direct-messages/{connection_id}')
+def list_direct_messages(
+    connection_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    import uuid as _uuid
+
+    connection = db.query(UserConnection).filter(UserConnection.id == _uuid.UUID(connection_id)).first()
+    if connection is None or current_user.id not in {connection.requester_id, connection.recipient_id}:
+        raise HTTPException(status_code=404, detail="Connection not found.")
+    if connection.status != "accepted":
+        raise HTTPException(status_code=403, detail="Direct messages require an accepted connection.")
+
+    messages = (
+        db.query(DirectMessage)
+        .filter(DirectMessage.connection_id == connection.id)
+        .order_by(DirectMessage.created_at.asc())
+        .all()
+    )
+    return {
+        "connection": _serialize_connection(connection, str(current_user.id)),
+        "messages": [
+            {
+                "message_id": str(m.id),
+                "sender_id": str(m.sender_id),
+                "receiver_id": str(m.receiver_id),
+                "message": m.message,
+                "created_at": m.created_at.isoformat(),
+                "read_at": m.read_at.isoformat() if m.read_at else None,
+            }
+            for m in messages
+        ],
+    }
+
+
+@app.post('/experience/ask')
+def ask_from_matched_user_experience(
+    body: ExperienceAskRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    import uuid as _uuid
+    from experience_service import (
+        answer_from_user_experience,
+        can_use_target_experience,
+        get_latest_profile_for_user,
+        profile_to_context,
+    )
+
+    if not body.question.strip():
+        raise HTTPException(status_code=422, detail="Question cannot be empty.")
+
+    target_profile = db.query(UserProfile).filter(UserProfile.id == _uuid.UUID(body.target_profile_id)).first()
+    if target_profile is None or target_profile.user_id is None:
+        raise HTTPException(status_code=404, detail="Selected user's profile is not available.")
+
+    asker_profile = get_latest_profile_for_user(current_user.id, db)
+    if not can_use_target_experience(current_user.id, target_profile, asker_profile, db):
+        raise HTTPException(status_code=403, detail="This user's experience is not available for your current match state.")
+
+    answer, context = answer_from_user_experience(
+        asker_id=current_user.id,
+        asker_profile=asker_profile,
+        target_profile=target_profile,
+        question=body.question.strip(),
+        db=db,
+    )
+
+    return {
+        "target_user": profile_to_context(target_profile),
+        "answer": answer,
+        "context_summary": {
+            "memory_count": len(context["memories"]),
+            "recent_exchange_count": len(context["recent_exchanges"]),
+        },
+    }
+
 
 from typing import Any
 
@@ -730,7 +1042,7 @@ def chat_end_session(
     Explicitly ends the current chat session.
 
     Compresses any remaining conversation into a long-term episodic memory,
-    persists it to PostgreSQL and ChromaDB, then rolls to a fresh session.
+    persists it to PostgreSQL and Pinecone, then rolls to a fresh session.
 
     Auth: Required (Bearer JWT).
     """

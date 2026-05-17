@@ -18,6 +18,8 @@ services:
         value: 10080
       - key: GOOGLE_CLIENT_ID
         sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
       - key: PINECONE_API_KEY
         sync: false
       - key: PINECONE_INDEX_NAME

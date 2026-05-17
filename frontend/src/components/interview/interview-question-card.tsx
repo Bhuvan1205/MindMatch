@@ -13,11 +13,15 @@ export function InterviewQuestionCard({
   agentMessage,
   isLoading,
   isSubmitting,
+  label = "MindMatch AI",
+  subtitle,
 }: {
   question: string | null;
   agentMessage: string | null;
   isLoading: boolean;
   isSubmitting: boolean;
+  label?: string;
+  subtitle?: string;
 }) {
   const streamedQuestion = useStreamingText(question, 16);
 
@@ -34,9 +38,9 @@ export function InterviewQuestionCard({
             )}
           </div>
           <div>
-            <p className="text-sm font-medium">MindMatch AI</p>
+            <p className="text-sm font-medium">{label}</p>
             <p className="text-xs text-muted-foreground">
-              {isSubmitting ? "Reading your answer" : "Interview companion"}
+              {isSubmitting ? "Reading your answer" : (subtitle ?? "Interview companion")}
             </p>
           </div>
         </div>

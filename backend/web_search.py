@@ -68,8 +68,8 @@ def perform_web_search(query: str, max_results: int = 3) -> list[dict]:
         print(f"\n[WEB SEARCH] Found {len(snippets)} snippets\n")
         return snippets
     except ImportError:
-        print("\n[WEB SEARCH ERROR] ddgs is not installed! Run: pip install ddgs\n")
-        logger.error("ddgs is not installed. Please run 'pip install ddgs'.")
+        print("\n[WEB SEARCH ERROR] duckduckgo_search is not installed! Run: pip install duckduckgo-search\n")
+        logger.error("duckduckgo_search is not installed. Please run 'pip install duckduckgo-search'.")
         return []
     except Exception as e:
         print(f"\n[WEB SEARCH ERROR] Failed to fetch search results: {e}\n")
