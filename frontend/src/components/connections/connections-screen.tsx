@@ -30,7 +30,7 @@ export function ConnectionsScreen() {
 
   const connections = connectionsQuery.data?.connections ?? [];
 
-  if (connectionsQuery.isPending && connections.length === 0) {
+  if (connectionsQuery.isPending) {
     return (
       <section className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -188,7 +188,7 @@ function ChatThread({ connection }: { connection: UserConnection }) {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
-        {threadQuery.isPending && (!threadQuery.data || threadQuery.data.messages.length === 0) ? (
+        {threadQuery.isPending ? (
           <div className="flex h-full items-center justify-center">
             <Loader2 className="size-6 animate-spin text-muted-foreground" />
           </div>
