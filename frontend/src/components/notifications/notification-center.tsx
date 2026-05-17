@@ -2,16 +2,19 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Bell, CheckCheck, Loader2, MessageCircle, UserCheck, UserPlus } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bell, CheckCheck, Loader2, MessageCircle, Sparkles, UserCheck, UserPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { mindmatchApi } from "@/lib/api/mindmatch";
 
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = React.useState(false);
+  const [dismissedKeys, setDismissedKeys] = React.useState<string[]>([]);
+  const [announcement, setAnnouncement] = React.useState<string | null>(null);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+
   const notificationsQuery = useQuery({
     queryKey: ["notifications"],
     queryFn: mindmatchApi.notifications,
@@ -22,15 +25,21 @@ export function NotificationCenter() {
     mutationFn: mindmatchApi.markNotificationRead,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
   });
+
   const markAllReadMutation = useMutation({
     mutationFn: mindmatchApi.markAllNotificationsRead,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
   });
 
-  const notifications = notificationsQuery.data;
-  const totalUnread =
-    (notifications?.pending_request_count ?? 0) + (notifications?.unread_message_count ?? 0);
-  const groupedPeople = buildGroupedPeople(notifications);
+  const groupedPeople = buildGroupedPeople(notificationsQuery.data);
+  const visiblePeople = groupedPeople
+    .map((person) => ({
+      ...person,
+      items: person.items.filter((item) => !dismissedKeys.includes(item.key)),
+    }))
+    .filter((person) => person.items.length > 0);
+  const totalVisible = visiblePeople.reduce((sum, person) => sum + person.items.length, 0);
+  const previousVisibleRef = React.useRef(0);
 
   React.useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -43,6 +52,34 @@ export function NotificationCenter() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, []);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      previousVisibleRef.current = totalVisible;
+      return;
+    }
+
+    if (totalVisible > previousVisibleRef.current) {
+      const delta = totalVisible - previousVisibleRef.current;
+      setAnnouncement(delta === 1 ? "1 new notification" : `${delta} new notifications`);
+      const timer = window.setTimeout(() => setAnnouncement(null), 3500);
+      previousVisibleRef.current = totalVisible;
+      return () => window.clearTimeout(timer);
+    }
+
+    previousVisibleRef.current = totalVisible;
+  }, [isOpen, totalVisible]);
+
+  function dismissItem(item: NotificationItem) {
+    setDismissedKeys((current) => (current.includes(item.key) ? current : [...current, item.key]));
+  }
+
+  function dismissAllVisibleMessages() {
+    const messageKeys = visiblePeople.flatMap((person) =>
+      person.items.filter((item) => item.kind === "message").map((item) => item.key),
+    );
+    setDismissedKeys((current) => [...new Set([...current, ...messageKeys])]);
+  }
+
   return (
     <div ref={rootRef} className="relative">
       <Button
@@ -50,99 +87,111 @@ export function NotificationCenter() {
         variant="ghost"
         size="icon"
         aria-label="Notifications"
-        className="relative text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+        className={`relative text-muted-foreground hover:bg-muted/70 hover:text-foreground ${totalVisible > 0 ? "bg-primary/10 text-primary" : ""}`}
         onClick={() => setIsOpen((open) => !open)}
       >
-        <Bell className="size-4" />
-        {totalUnread > 0 ? (
-          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
-            {totalUnread > 9 ? "9+" : totalUnread}
-          </span>
+        <Bell className={`size-4 ${totalVisible > 0 ? "animate-pulse" : ""}`} />
+        {totalVisible > 0 ? (
+          <>
+            <span className="absolute inset-0 rounded-full ring-2 ring-primary/30 ring-offset-2 ring-offset-background" />
+            <span className="absolute -right-0.5 -top-0.5 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground shadow-md">
+              {totalVisible > 9 ? "9+" : totalVisible}
+            </span>
+          </>
         ) : null}
       </Button>
 
-      {isOpen ? (
-      <div className="absolute right-0 top-[calc(100%+0.75rem)] z-50 w-80 rounded-xl border bg-card/95 p-3 shadow-xl backdrop-blur-xl">
-        <div className="flex items-center justify-between border-b pb-3">
-          <div>
-            <p className="text-sm font-semibold">Notifications</p>
-            <p className="text-xs text-muted-foreground">
-              Requests and messages from your matches
-            </p>
+      {announcement && !isOpen ? (
+        <div className="absolute right-0 top-[calc(100%+0.65rem)] z-50 w-56 rounded-xl border border-primary/20 bg-card/95 px-3 py-2 shadow-xl backdrop-blur-xl">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <Sparkles className="size-4 text-primary" />
+            {announcement}
           </div>
-          {notificationsQuery.isFetching ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+          <p className="mt-1 text-xs text-muted-foreground">Open notifications to review them.</p>
         </div>
+      ) : null}
 
-        <div className="mt-3 max-h-96 space-y-3 overflow-y-auto">
-          {notifications && notifications.unread_message_count > 0 ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start gap-2"
-              disabled={markAllReadMutation.isPending}
-              onClick={() => markAllReadMutation.mutate()}
-            >
-              {markAllReadMutation.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <CheckCheck className="size-4" />
-              )}
-              Mark all messages as read
-            </Button>
-          ) : null}
-
-          {groupedPeople.map((person) => (
-            <div key={person.id} className="rounded-lg border bg-background/70 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold">{person.name}</p>
-                <p className="text-xs text-muted-foreground">{person.items.length} update{person.items.length === 1 ? "" : "s"}</p>
-              </div>
-              <div className="mt-3 space-y-2">
-                {person.items.map((item) => (
-                  <Link
-                    key={item.key}
-                    href="/connections"
-                    onClick={() => {
-                      if (item.kind === "message" && !item.readAt) {
-                        markReadMutation.mutate({ message_id: item.messageId });
-                      }
-                      setIsOpen(false);
-                    }}
-                    className={`block rounded-md border px-3 py-2 transition-colors hover:border-primary/30 hover:bg-primary/5 ${
-                      item.kind === "message" && !item.readAt ? "bg-primary/5" : "bg-background/80"
-                    }`}
-                  >
-                    <div className="flex gap-3">
-                      {item.kind === "request" ? (
-                        <UserPlus className="mt-0.5 size-4 shrink-0 text-primary" />
-                      ) : item.kind === "accepted" ? (
-                        <UserCheck className="mt-0.5 size-4 shrink-0 text-primary" />
-                      ) : (
-                        <MessageCircle className="mt-0.5 size-4 shrink-0 text-primary" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{item.title}</p>
-                        {item.preview ? <p className="mt-1 truncate text-sm text-muted-foreground">{item.preview}</p> : null}
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {new Date(item.timestamp).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+      {isOpen ? (
+        <div className="absolute right-0 top-[calc(100%+0.75rem)] z-50 w-80 rounded-xl border bg-card/95 p-3 shadow-xl backdrop-blur-xl">
+          <div className="flex items-center justify-between border-b pb-3">
+            <div>
+              <p className="text-sm font-semibold">Notifications</p>
+              <p className="text-xs text-muted-foreground">Requests and messages from your matches</p>
             </div>
-          ))}
+            {notificationsQuery.isFetching ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+          </div>
 
-          {!notificationsQuery.isPending &&
-          groupedPeople.length === 0 ? (
-            <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-              No notifications yet.
-            </p>
-          ) : null}
+          <div className="mt-3 max-h-96 space-y-3 overflow-y-auto">
+            {visiblePeople.some((person) => person.items.some((item) => item.kind === "message")) ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start gap-2"
+                disabled={markAllReadMutation.isPending}
+                onClick={() => {
+                  dismissAllVisibleMessages();
+                  markAllReadMutation.mutate();
+                }}
+              >
+                {markAllReadMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <CheckCheck className="size-4" />}
+                Mark all messages as read
+              </Button>
+            ) : null}
+
+            {visiblePeople.map((person) => (
+              <div key={person.id} className="rounded-lg border bg-background/70 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold">{person.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {person.items.length} update{person.items.length === 1 ? "" : "s"}
+                  </p>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  {person.items.map((item) => (
+                    <Link
+                      key={item.key}
+                      href="/connections"
+                      onClick={() => {
+                        dismissItem(item);
+                        if (item.kind === "message" && !item.readAt) {
+                          markReadMutation.mutate({ message_id: item.messageId });
+                        }
+                        setIsOpen(false);
+                      }}
+                      className={`block rounded-md border px-3 py-2 transition-colors hover:border-primary/30 hover:bg-primary/5 ${
+                        item.kind === "message" && !item.readAt ? "bg-primary/10 ring-1 ring-primary/20" : "bg-background/80"
+                      }`}
+                    >
+                      <div className="flex gap-3">
+                        {item.kind === "request" ? (
+                          <UserPlus className="mt-0.5 size-4 shrink-0 text-primary" />
+                        ) : item.kind === "accepted" ? (
+                          <UserCheck className="mt-0.5 size-4 shrink-0 text-primary" />
+                        ) : (
+                          <MessageCircle className="mt-0.5 size-4 shrink-0 text-primary" />
+                        )}
+
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">{item.title}</p>
+                          {item.preview ? <p className="mt-1 truncate text-sm text-muted-foreground">{item.preview}</p> : null}
+                          <p className="mt-1 text-xs text-muted-foreground">{new Date(item.timestamp).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {!notificationsQuery.isPending && visiblePeople.length === 0 ? (
+              <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+                No notifications yet.
+              </p>
+            ) : null}
+          </div>
         </div>
-      </div>
       ) : null}
     </div>
   );
@@ -227,9 +276,7 @@ function buildGroupedPeople(notifications: Awaited<ReturnType<typeof mindmatchAp
   return [...people.values()]
     .map((person) => ({
       ...person,
-      items: person.items.sort(
-        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-      ),
+      items: person.items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
     }))
     .sort((a, b) => {
       const aLatest = new Date(a.items[0]?.timestamp ?? 0).getTime();
