@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertCircle, ArrowLeft, ArrowRight, Loader2, MessageCircle, RefreshCw, Search, type LucideIcon } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, Loader2, RefreshCw, Search, type LucideIcon } from "lucide-react";
 
 import { EmptyState } from "@/components/feedback/empty-state";
 import { ScoreRing } from "@/components/matches/score-ring";
+import { ConnectionRequestButton } from "@/components/shared/connection-request-button";
 import { IdentityAvatar } from "@/components/shared/identity-avatar";
 import { Button } from "@/components/ui/button";
 import { getApiErrorMessage } from "@/lib/api/errors";
@@ -133,6 +134,24 @@ export function MatchesScreen() {
             <MatchCard key={`${match.user}-${index}`} match={match} index={index} />
           ))}
         </motion.div>
+
+        <motion.div variants={softReveal} className="mt-8 rounded-lg border bg-card/75 p-6 shadow-soft backdrop-blur-xl">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.16em] text-muted-foreground">Beyond ranked matches</p>
+              <h2 className="mt-2 text-2xl font-medium tracking-tight">Search the wider community</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-7 text-muted-foreground">
+                Your ranked matches stay here, but you can also discover and connect with people outside the matching system whenever you want to explore more broadly.
+              </p>
+            </div>
+            <Button asChild className="w-fit rounded-full px-6">
+              <Link href="/discover">
+                Search everyone
+                <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+          </div>
+        </motion.div>
       </motion.div>
     </MatchesShell>
   );
@@ -140,14 +159,6 @@ export function MatchesScreen() {
 
 function MatchCard({ match, index }: { match: RankedMatch; index: number }) {
   const targetProfileId = match.profile.profile_id;
-  const connectionMutation = useMutation({
-    mutationFn: () => {
-      if (!targetProfileId) {
-        throw new Error("This match is missing a profile id.");
-      }
-      return mindmatchApi.requestConnection({ target_profile_id: targetProfileId });
-    },
-  });
 
   return (
     <motion.article
@@ -169,26 +180,17 @@ function MatchCard({ match, index }: { match: RankedMatch; index: number }) {
       <p className="mt-5 line-clamp-4 flex-1 text-sm leading-6 text-muted-foreground">{match.reason}</p>
 
       <div className="mt-5 grid gap-2">
-      <Button asChild variant="secondary" className="w-full">
-        <Link href={`/matches/${index}`}>
-          View details
-          <ArrowRight className="size-4" />
-        </Link>
-      </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          disabled={!targetProfileId || connectionMutation.isPending}
-          onClick={() => connectionMutation.mutate()}
-        >
-          {connectionMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <MessageCircle className="size-4" />}
-          {connectionMutation.data
-            ? connectionMutation.data.status === "accepted"
-              ? "Connected"
-              : "Request sent"
-            : "Request chat"}
+        <Button asChild variant="secondary" className="w-full">
+          <Link href={`/matches/${index}`}>
+            View details
+            <ArrowRight className="size-4" />
+          </Link>
         </Button>
+        <ConnectionRequestButton
+          targetProfileId={targetProfileId}
+          idleLabel="Request chat"
+          className="w-full"
+        />
       </div>
       <p className="mt-3 text-xs leading-5 text-muted-foreground">
         Requests use this match profile to ask for direct interaction.

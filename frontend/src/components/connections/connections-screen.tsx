@@ -79,7 +79,6 @@ export function ConnectionsScreen() {
           {connections.map((connection) => {
             const isAccepted = connection.status === "accepted";
             const isPendingIncoming = connection.status === "pending" && connection.is_incoming;
-            const isPendingOutgoing = connection.status === "pending" && !connection.is_incoming;
             const isActive = activeConnectionId === connection.connection_id;
 
             return (

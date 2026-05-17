@@ -191,3 +191,25 @@ class ExperienceRoutingLog(Base):
     query          = Column(Text, nullable=False)
     response       = Column(Text, nullable=False)
     context_metadata = Column(JSONB, nullable=True)
+
+
+# =========================================================
+# MATCHA ADVICE RELAY
+# Tracks anonymous Matcha-mediated advice requests between users.
+# =========================================================
+
+class AdviceRelayRequest(Base):
+    __tablename__ = "advice_relay_requests"
+
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    requester_id   = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    target_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    target_profile_id = Column(UUID(as_uuid=True), ForeignKey("user_profiles.id"), nullable=False)
+
+    question       = Column(Text, nullable=False)
+    status         = Column(String, default="pending", nullable=False)  # pending | answered | declined
+    response       = Column(Text, nullable=True)
+    answered_at    = Column(DateTime, nullable=True)

@@ -26,6 +26,7 @@ import type {
   MarkNotificationReadResponse,
   MarkAllNotificationsReadResponse,
   NotificationsResponse,
+  SearchUsersResponse,
   UserConnection,
 } from "@/lib/api/types";
 
@@ -78,6 +79,10 @@ export const mindmatchApi = {
       method: "POST",
       body,
     });
+  },
+
+  searchUsers(query: string) {
+    return apiRequest<SearchUsersResponse>(`/users/search?q=${encodeURIComponent(query)}`);
   },
 
   // ── Chat ─────────────────────────────────────────────────

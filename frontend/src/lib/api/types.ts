@@ -129,6 +129,16 @@ export type ChatSendResponse = {
 export type ChatHistoryResponse = {
   session_id: string;
   exchanges: ChatExchange[];
+  messages?: {
+    id: string;
+    role: "user" | "assistant";
+    text: string;
+    created_at: string;
+    kind?: string;
+    relay_id?: string;
+    target_name?: string | null;
+    question?: string | null;
+  }[];
 };
 
 export type ChatEndResponse = {
@@ -240,4 +250,16 @@ export type MarkNotificationReadResponse = {
 
 export type MarkAllNotificationsReadResponse = {
   updated_count: number;
+};
+
+export type SearchUserResult = CognitiveProfile & {
+  profile_id: string;
+  user_id: string;
+  created_at: string;
+  connection?: UserConnection | null;
+};
+
+export type SearchUsersResponse = {
+  query: string;
+  results: SearchUserResult[];
 };

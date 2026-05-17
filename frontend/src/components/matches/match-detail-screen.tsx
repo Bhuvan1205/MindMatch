@@ -2,38 +2,21 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowLeft, Loader2, Search, Sparkles } from "lucide-react";
+import { ArrowLeft, Search } from "lucide-react";
 
 import { EmptyState } from "@/components/feedback/empty-state";
 import { ProfileComparisonReport } from "@/components/matches/profile-comparison-report";
 import { ScoreRing } from "@/components/matches/score-ring";
 import { IdentityAvatar } from "@/components/shared/identity-avatar";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { mindmatchApi } from "@/lib/api/mindmatch";
 import { softReveal } from "@/components/motion/motion-config";
 import { useProfileStore } from "@/stores/profile-store";
 
 export function MatchDetailScreen({ matchIndex }: { matchIndex: string }) {
   const { matches, profile } = useProfileStore();
-  const [experienceQuestion, setExperienceQuestion] = React.useState("");
   const index = Number.parseInt(matchIndex, 10);
   const match = Number.isInteger(index) ? matches?.ranked_matches[index] : undefined;
-  const targetProfileId = match?.profile.profile_id;
-
-  const experienceMutation = useMutation({
-    mutationFn: () => {
-      if (!targetProfileId) {
-        throw new Error("This match is missing a profile id.");
-      }
-      return mindmatchApi.askExperience({
-        target_profile_id: targetProfileId,
-        question: experienceQuestion.trim(),
-      });
-    },
-  });
 
   if (!matches || !match || !profile) {
     return (
@@ -97,45 +80,12 @@ export function MatchDetailScreen({ matchIndex }: { matchIndex: string }) {
           </section>
 
           <section className="mt-10 rounded-lg border bg-background/70 p-6">
-            <div className="flex items-center gap-2">
-              <Sparkles className="size-4 text-primary" />
-              <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                Ask From Their Experience
-              </h2>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              MindMatch uses this matched user&apos;s stored profile, summaries, and recent LLM interaction context to synthesize advice. It does not send your question as a direct message.
+            <p className="text-sm leading-7 text-muted-foreground">
+              Want advice from {match.user} without starting a direct conversation? Ask Matcha in chat and it can relay the question for you.
             </p>
-            <div className="mt-5 grid gap-3">
-              <Textarea
-                value={experienceQuestion}
-                onChange={(event) => setExperienceQuestion(event.target.value)}
-                placeholder={`Ask what ${match.user} might have useful experience with...`}
-                className="min-h-24"
-              />
-              <Button
-                type="button"
-                disabled={!targetProfileId || !experienceQuestion.trim() || experienceMutation.isPending}
-                onClick={() => experienceMutation.mutate()}
-                className="w-fit"
-              >
-                {experienceMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                Ask with context
-              </Button>
-            </div>
-            {experienceMutation.data ? (
-              <div className="mt-5 rounded-lg border bg-primary/5 p-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  Synthesized from {experienceMutation.data.context_summary.memory_count} memories and {experienceMutation.data.context_summary.recent_exchange_count} recent exchanges
-                </p>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-7">{experienceMutation.data.answer}</p>
-              </div>
-            ) : null}
-            {experienceMutation.error ? (
-              <p className="mt-4 text-sm text-destructive">
-                {experienceMutation.error instanceof Error ? experienceMutation.error.message : "Could not route this question."}
-              </p>
-            ) : null}
+            <Button asChild className="mt-4 w-fit">
+              <Link href="/chat">Open Matcha</Link>
+            </Button>
           </section>
         </div>
       </motion.div>

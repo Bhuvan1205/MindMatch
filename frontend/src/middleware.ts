@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PROTECTED = ["/interview", "/profile", "/matches", "/connections", "/llm-features", "/chat"];
+const PROTECTED = ["/interview", "/profile", "/matches", "/connections", "/discover", "/llm-features", "/chat"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -28,6 +28,7 @@ export const config = {
     "/profile/:path*",
     "/matches/:path*",
     "/connections/:path*",
+    "/discover/:path*",
     "/llm-features/:path*",
     "/chat/:path*",
     "/chat",

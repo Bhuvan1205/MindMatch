@@ -4,7 +4,7 @@ import os
 # Ensure backend/ is on the path regardless of where uvicorn is launched from
 sys.path.insert(0, os.path.dirname(__file__))
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -750,6 +750,71 @@ def _latest_profile_name(user_id, db: Session) -> str | None:
         .first()
     )
     return profile.name if profile else None
+
+
+@app.get('/users/search')
+def search_users(
+    q: str = Query(..., min_length=1),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    search_term = q.strip()
+    if not search_term:
+        return {"query": q, "results": []}
+
+    lowered = search_term.lower()
+    profiles = (
+        db.query(UserProfile)
+        .filter(UserProfile.user_id.isnot(None), UserProfile.user_id != current_user.id)
+        .order_by(UserProfile.created_at.desc())
+        .all()
+    )
+
+    latest_by_user: dict = {}
+    for profile in profiles:
+        if profile.user_id in latest_by_user:
+            continue
+        latest_by_user[profile.user_id] = profile
+
+    results = []
+    for profile in latest_by_user.values():
+        haystacks = [
+            profile.name or "",
+            " ".join(profile.interests or []),
+            " ".join(profile.goals or []),
+            " ".join(profile.discussion_topics or []),
+        ]
+        if lowered not in " ".join(haystacks).lower():
+            continue
+
+        connection = (
+            db.query(UserConnection)
+            .filter(
+                ((UserConnection.requester_id == current_user.id) & (UserConnection.recipient_id == profile.user_id))
+                | ((UserConnection.requester_id == profile.user_id) & (UserConnection.recipient_id == current_user.id))
+            )
+            .order_by(UserConnection.created_at.desc())
+            .first()
+        )
+
+        results.append(
+            {
+                "profile_id": str(profile.id),
+                "user_id": str(profile.user_id),
+                "created_at": profile.created_at.isoformat(),
+                "name": profile.name,
+                "interests": profile.interests or [],
+                "goals": profile.goals or [],
+                "learning_preferences": profile.learning_preferences or [],
+                "collaboration_preferences": profile.collaboration_preferences or [],
+                "execution_patterns": profile.execution_patterns or [],
+                "discussion_topics": profile.discussion_topics or [],
+                "connection": _serialize_connection(connection, str(current_user.id), db) if connection else None,
+            }
+        )
+
+    results.sort(key=lambda item: ((item.get("name") or "").lower().find(lowered) if (item.get("name") or "").lower().find(lowered) >= 0 else 9999, item.get("name") or ""))
+    return {"query": search_term, "results": results[:24]}
 
 
 @app.post('/connections/request')
