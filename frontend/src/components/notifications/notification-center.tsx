@@ -15,7 +15,7 @@ export function NotificationCenter() {
   const notificationsQuery = useQuery({
     queryKey: ["notifications"],
     queryFn: mindmatchApi.notifications,
-    refetchInterval: 30_000,
+    refetchInterval: 5000,
   });
 
   const markReadMutation = useMutation({
