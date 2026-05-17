@@ -714,7 +714,9 @@ class ExperienceAskRequest(BaseModel):
 
 
 class MarkNotificationReadRequest(BaseModel):
-    message_id: str
+    message_id: str | None = None
+    connection_id: str | None = None
+    notification_kind: str | None = None
 
 
 class MarkAllNotificationsReadResponse(BaseModel):
@@ -890,6 +892,7 @@ def list_notifications(
         .filter(
             UserConnection.recipient_id == current_user.id,
             UserConnection.status == "pending",
+            UserConnection.recipient_request_seen_at.is_(None),
         )
         .order_by(UserConnection.created_at.desc())
         .limit(10)
@@ -898,7 +901,10 @@ def list_notifications(
 
     received_messages = (
         db.query(DirectMessage)
-        .filter(DirectMessage.receiver_id == current_user.id)
+        .filter(
+            DirectMessage.receiver_id == current_user.id,
+            DirectMessage.read_at.is_(None),
+        )
         .order_by(DirectMessage.created_at.desc())
         .limit(20)
         .all()
@@ -918,6 +924,7 @@ def list_notifications(
         .filter(
             UserConnection.requester_id == current_user.id,
             UserConnection.status == "accepted",
+            UserConnection.requester_accepted_seen_at.is_(None),
         )
         .order_by(UserConnection.updated_at.desc())
         .limit(10)
@@ -967,19 +974,43 @@ def mark_notification_read(
     db: Session = Depends(get_db),
 ):
     import uuid as _uuid
+    from datetime import datetime
 
-    message = db.query(DirectMessage).filter(DirectMessage.id == _uuid.UUID(body.message_id)).first()
-    if message is None or message.receiver_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Notification not found.")
+    if body.message_id:
+        message = db.query(DirectMessage).filter(DirectMessage.id == _uuid.UUID(body.message_id)).first()
+        if message is None or message.receiver_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Notification not found.")
 
-    if message.read_at is None:
-        from datetime import datetime
+        if message.read_at is None:
+            message.read_at = datetime.utcnow()
+            db.commit()
+            db.refresh(message)
 
-        message.read_at = datetime.utcnow()
-        db.commit()
-        db.refresh(message)
+        return {"message_id": str(message.id), "read_at": message.read_at.isoformat() if message.read_at else None}
 
-    return {"message_id": str(message.id), "read_at": message.read_at.isoformat() if message.read_at else None}
+    if body.connection_id and body.notification_kind:
+        connection = db.query(UserConnection).filter(UserConnection.id == _uuid.UUID(body.connection_id)).first()
+        if connection is None:
+            raise HTTPException(status_code=404, detail="Notification not found.")
+
+        if body.notification_kind == "request":
+            if connection.recipient_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Not allowed to dismiss this notification.")
+            if connection.recipient_request_seen_at is None:
+                connection.recipient_request_seen_at = datetime.utcnow()
+                db.commit()
+        elif body.notification_kind == "accepted":
+            if connection.requester_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Not allowed to dismiss this notification.")
+            if connection.requester_accepted_seen_at is None:
+                connection.requester_accepted_seen_at = datetime.utcnow()
+                db.commit()
+        else:
+            raise HTTPException(status_code=422, detail="Unsupported notification kind.")
+
+        return {"message_id": None, "read_at": datetime.utcnow().isoformat()}
+
+    raise HTTPException(status_code=422, detail="A message_id or connection notification payload is required.")
 
 
 @app.post('/notifications/read-all', response_model=MarkAllNotificationsReadResponse)
@@ -1013,6 +1044,7 @@ def accept_connection(
     db: Session = Depends(get_db),
 ):
     import uuid as _uuid
+    from datetime import datetime
 
     connection = db.query(UserConnection).filter(UserConnection.id == _uuid.UUID(body.connection_id)).first()
     if connection is None:
@@ -1021,6 +1053,8 @@ def accept_connection(
         raise HTTPException(status_code=403, detail="Only the recipient can accept this connection.")
 
     connection.status = "accepted"
+    connection.recipient_request_seen_at = datetime.utcnow()
+    connection.requester_accepted_seen_at = None
     db.commit()
     db.refresh(connection)
     return _serialize_connection(connection, str(current_user.id), db)

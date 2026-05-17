@@ -240,11 +240,13 @@ export type NotificationsResponse = {
 };
 
 export type MarkNotificationReadRequest = {
-  message_id: string;
+  message_id?: string;
+  connection_id?: string;
+  notification_kind?: "request" | "accepted";
 };
 
 export type MarkNotificationReadResponse = {
-  message_id: string;
+  message_id: string | null;
   read_at: string | null;
 };
 

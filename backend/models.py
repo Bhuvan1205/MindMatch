@@ -152,6 +152,8 @@ class UserConnection(Base):
 
     # pending | accepted | declined | blocked
     status         = Column(String, default="pending", nullable=False)
+    recipient_request_seen_at = Column(DateTime, nullable=True)
+    requester_accepted_seen_at = Column(DateTime, nullable=True)
 
 
 # =========================================================

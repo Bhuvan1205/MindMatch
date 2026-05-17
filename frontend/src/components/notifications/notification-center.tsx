@@ -157,6 +157,16 @@ export function NotificationCenter() {
                         dismissItem(item);
                         if (item.kind === "message" && !item.readAt) {
                           markReadMutation.mutate({ message_id: item.messageId });
+                        } else if (item.kind === "request") {
+                          markReadMutation.mutate({
+                            connection_id: item.connectionId,
+                            notification_kind: "request",
+                          });
+                        } else if (item.kind === "accepted") {
+                          markReadMutation.mutate({
+                            connection_id: item.connectionId,
+                            notification_kind: "accepted",
+                          });
                         }
                         setIsOpen(false);
                       }}
@@ -201,6 +211,7 @@ type NotificationItem =
   | {
       key: string;
       kind: "request";
+      connectionId: string;
       title: string;
       preview: null;
       timestamp: string;
@@ -208,6 +219,7 @@ type NotificationItem =
   | {
       key: string;
       kind: "accepted";
+      connectionId: string;
       title: string;
       preview: null;
       timestamp: string;
@@ -245,6 +257,7 @@ function buildGroupedPeople(notifications: Awaited<ReturnType<typeof mindmatchAp
     ensurePerson(request.requester_id, request.requester_name).items.push({
       key: `request-${request.connection_id}`,
       kind: "request",
+      connectionId: request.connection_id,
       title: "Sent you a connection request",
       preview: null,
       timestamp: request.created_at,
@@ -255,6 +268,7 @@ function buildGroupedPeople(notifications: Awaited<ReturnType<typeof mindmatchAp
     ensurePerson(accepted.recipient_id, accepted.recipient_name).items.push({
       key: `accepted-${accepted.connection_id}`,
       kind: "accepted",
+      connectionId: accepted.connection_id,
       title: "Accepted your connection request",
       preview: null,
       timestamp: accepted.accepted_at,
