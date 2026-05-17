@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from datetime import datetime
 
 from sqlalchemy.orm import Session as DBSession
 
@@ -83,6 +84,7 @@ def roll_new_session(user_id: str, old_session_id: str, db: DBSession) -> str:
         old.is_active = False
         old.ended_at = datetime.utcnow()
         db.commit()
+        logger.info("memory_manager: old session %s marked inactive with ended_at = %s", old.id, old.ended_at)
 
     # Create fresh session
     new_session = ChatSession(
