@@ -19,12 +19,11 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 from matcha_relay_service import (
     answer_pending_relay,
-    build_chat_history_messages,
     create_relay_request,
     detect_relay_intent,
     get_pending_relay_for_target,
 )
-from memory_manager import check_and_compress, get_active_window, get_or_create_session
+from memory_manager import check_and_compress, get_active_window, get_or_create_session, get_session_by_id
 from memory_vector_store import retrieve_relevant_memories
 from models import ConversationExchange, UserProfile
 from prompt_builder import build_prompt
@@ -81,10 +80,20 @@ def _persist_exchange(
 def _build_history_payload(session_id: str, exchanges: list[ConversationExchange], user_id: str, db: DBSession) -> dict:
     message_feed: list[dict] = []
 
-    for index, ex in enumerate(exchanges):
+    # ── Defensive assertion: ensure no cross-session message contamination ───
+    for ex in exchanges:
+        ex_session_id = str(ex.session_id)
+        if ex_session_id != session_id:
+            logger.error(
+                "chat_service: CROSS-SESSION CONTAMINATION DETECTED — exchange %s belongs to session %s, not active session %s (user %s)",
+                ex.id, ex_session_id, session_id, user_id,
+            )
+            # Skip contaminated messages entirely rather than serve wrong data
+            continue
+
         message_feed.append(
             {
-                "id": f"history-user-{index}",
+                "id": f"history-user-{len(message_feed) // 2}",
                 "role": "user",
                 "text": ex.user_message,
                 "created_at": ex.created_at.isoformat(),
@@ -93,7 +102,7 @@ def _build_history_payload(session_id: str, exchanges: list[ConversationExchange
         )
         message_feed.append(
             {
-                "id": f"history-assistant-{index}",
+                "id": f"history-assistant-{len(message_feed) // 2}",
                 "role": "assistant",
                 "text": ex.assistant_message,
                 "created_at": ex.created_at.isoformat(),
@@ -101,20 +110,17 @@ def _build_history_payload(session_id: str, exchanges: list[ConversationExchange
             }
         )
 
-    # Tag each message with its insertion position before merging relay messages.
-    # User + assistant in the same exchange share identical created_at timestamps, so
-    # the old id-string tiebreaker sorted "history-assistant-N" before "history-user-N"
-    # (because 'a' < 'u'), putting the reply above the user message. Using a numeric
-    # seq preserves insertion order for same-timestamp pairs.
-    for seq, msg in enumerate(message_feed):
-        msg["_seq"] = seq
-    relay_messages = build_chat_history_messages(user_id, db)
-    for seq, msg in enumerate(relay_messages, start=len(message_feed)):
-        msg["_seq"] = seq
-    message_feed.extend(relay_messages)
-    message_feed.sort(key=lambda item: (item.get("created_at") or "", item["_seq"]))
-    for msg in message_feed:
-        msg.pop("_seq", None)
+    logger.info(
+        "chat_service: _build_history_payload for session %s (user %s) — %d exchange messages",
+        session_id, user_id, len(message_feed),
+    )
+
+    # NOTE: Relay cards (relay_pending / relay_answer) are intentionally NOT
+    # injected here. Relay answers are delivered in the connections/direct-message
+    # UI, not in the Matcha LLM chat. Injecting them via build_chat_history_messages
+    # was the root cause of session resurrection: relay rows have no session_id, so
+    # they crossed session boundaries on every page refresh.
+    message_feed.sort(key=lambda item: item.get("created_at") or "")
 
     return {
         "session_id": session_id,
@@ -125,6 +131,7 @@ def _build_history_payload(session_id: str, exchanges: list[ConversationExchange
                 "created_at": ex.created_at.isoformat(),
             }
             for ex in exchanges
+            if str(ex.session_id) == session_id  # extra guard
         ],
         "messages": message_feed,
     }
@@ -159,11 +166,67 @@ def _maybe_handle_matcha_relay_reply(user_id: str, message: str, db: DBSession) 
     if answered_relay is None:
         return None
 
-    return (
-        "Thanks — I've passed your answer back through Matcha. "
-        "They'll see it in their Matcha chat without needing to open a direct conversation with you."
-    )
+    # ── Deliver the answer into the direct connection (DirectMessage) ─────────
+    # We deliver the reply into the personal chat (UserConnection) so the two
+    # users can continue the conversation directly without LLM mediation.
+    try:
+        from models import UserConnection, DirectMessage
+        from experience_service import get_connection_between, get_latest_profile_for_user
+        from datetime import datetime
 
+        requester_id_uuid = answered_relay.requester_id
+        target_id_uuid = uuid.UUID(user_id)
+        
+        # 1. Find or create the UserConnection
+        connection = get_connection_between(requester_id_uuid, target_id_uuid, db)
+        if not connection:
+            # If they aren't connected yet, create an accepted connection so they can chat
+            requester_profile = get_latest_profile_for_user(requester_id_uuid, db)
+            connection = UserConnection(
+                requester_id=requester_id_uuid,
+                recipient_id=target_id_uuid,
+                requester_profile_id=requester_profile.id if requester_profile else None,
+                recipient_profile_id=answered_relay.target_profile_id,
+                status="accepted",
+                recipient_request_seen_at=datetime.utcnow(),
+                requester_accepted_seen_at=datetime.utcnow()
+            )
+            db.add(connection)
+            db.commit()
+            db.refresh(connection)
+            logger.info("chat_service: created new accepted connection %s for relay answer", connection.id)
+        elif connection.status != "accepted":
+            connection.status = "accepted"
+            db.commit()
+            logger.info("chat_service: upgraded connection %s to accepted for relay answer", connection.id)
+
+        # 2. Write the DirectMessage
+        answer_text = (
+            f"*[Matcha Relay]*\n"
+            f"**Re:** {answered_relay.question}\n\n"
+            f"{answered_relay.response}"
+        )
+
+        delivery = DirectMessage(
+            connection_id=connection.id,
+            sender_id=target_id_uuid,
+            receiver_id=requester_id_uuid,
+            message=answer_text,
+        )
+        db.add(delivery)
+        db.commit()
+        logger.info(
+            "chat_service: relay answer from user %s delivered to requester %s via direct message",
+            user_id, requester_id_uuid,
+        )
+    except Exception as exc:
+        logger.error("chat_service: failed to deliver relay answer to direct message — %s", exc)
+        db.rollback()
+
+    return (
+        "Thanks — I've passed your answer back. "
+        "They'll see it in your direct connection chat."
+    )
 
 
 def _build_relay_candidates(user_id: str, user_profile: dict, db: DBSession) -> list[dict]:
@@ -251,8 +314,51 @@ def _maybe_create_matcha_relay(
             question=relay_intent["rewritten_question"],
             db=db,
         )
+
+        # ── Deliver the question to the TARGET user via Matcha Bot Chat ─────────
+        from models import UserConnection, DirectMessage
+        from experience_service import get_connection_between
+        from datetime import datetime
+
+        matcha_bot_id = uuid.UUID('11111111-1111-1111-1111-111111111111')
+        target_user_id = target_profile.user_id
+
+        # 1. Ensure Target User <-> Matcha Bot connection exists
+        bot_conn = get_connection_between(target_user_id, matcha_bot_id, db)
+        if not bot_conn:
+            bot_conn = UserConnection(
+                requester_id=target_user_id,
+                recipient_id=matcha_bot_id,
+                status="accepted",
+                recipient_request_seen_at=datetime.utcnow(),
+                requester_accepted_seen_at=datetime.utcnow()
+            )
+            db.add(bot_conn)
+            db.commit()
+            db.refresh(bot_conn)
+
+        # 2. Write the question as a DirectMessage from Matcha Bot to Target User
+        # We need the requester's name
+        from models import UserProfile as _UP
+        requester_profile = db.query(_UP).filter(
+            _UP.user_id == uuid.UUID(user_id)
+        ).order_by(_UP.created_at.desc()).first()
+        requester_name = requester_profile.name if requester_profile else "A match"
+
+        delivery = DirectMessage(
+            connection_id=bot_conn.id,
+            sender_id=matcha_bot_id,
+            receiver_id=target_user_id,
+            message=f"*[Matcha Relay Request]*\n**{requester_name}** wants your advice:\n\n{relay.question}\n\n*(Reply here to send your answer back anonymously)*",
+        )
+        db.add(delivery)
+        db.commit()
+
     except ValueError as exc:
         return {"notice": str(exc), "created": False}
+    except Exception as exc:
+        logger.error("chat_service: failed to deliver relay question via bot chat — %s", exc)
+        db.rollback()
 
     target_name = target_profile.name or "that match"
     return {
@@ -261,9 +367,8 @@ def _maybe_create_matcha_relay(
         "target_name": target_name,
         "question": relay.question,
         "notice": (
-            f"I've sent your question to {target_name} through Matcha.\n\n"
-            "If they're offline or reply later, I'll post their answer here in your personal Matcha chat as soon as I receive it.\n\n"
-            f"Question sent: {relay.question}"
+            f"I've sent your question to {target_name} through our secure bot chat.\n\n"
+            "When they reply, you'll receive a direct message from me in your **Connections** tab."
         ),
     }
 
@@ -290,12 +395,7 @@ def send_message(user_id: str, message: str, db: DBSession, temporary: bool = Fa
             for ex in exchanges
         ]
 
-    # Relay detection runs even in temp-chat — only *persistence* is skipped.
-    relay_reply = _maybe_handle_matcha_relay_reply(user_id, message, db)
-    if relay_reply is not None:
-        _persist_exchange(user_id, session_id, message, relay_reply, db, temporary)
-        return {"response": relay_reply, "session_id": session_id}
-
+    # Relay intent detection runs even in temp-chat — only *persistence* is skipped.
     relay_request = _maybe_create_matcha_relay(user_id, message, db, user_profile, active_window)
     relay_notice = relay_request["notice"] if relay_request else None
     if relay_request:
@@ -337,11 +437,34 @@ def send_message(user_id: str, message: str, db: DBSession, temporary: bool = Fa
 def get_history(user_id: str, db: DBSession, session_id: str | None = None) -> dict:
     if not session_id:
         session_id = get_or_create_session(user_id, db)
-        logger.info("chat_service: fetching history for active session %s", session_id)
+        session_rec = get_session_by_id(session_id, db)
+        logger.info(
+            "chat_service: GET /chat/history resolved active session — user=%s session_id=%s is_active=%s ended_at=%s",
+            user_id, session_id,
+            session_rec.is_active if session_rec else "MISSING",
+            session_rec.ended_at if session_rec else "MISSING",
+        )
     else:
-        logger.info("chat_service: fetching history for explicit session %s", session_id)
-    
+        session_rec = get_session_by_id(session_id, db)
+        if session_rec and not session_rec.is_active:
+            logger.warning(
+                "chat_service: EXPLICIT session_id %s is INACTIVE (ended_at=%s) for user %s — falling back to active session",
+                session_id, session_rec.ended_at, user_id,
+            )
+            session_id = get_or_create_session(user_id, db)
+        else:
+            logger.info(
+                "chat_service: GET /chat/history with explicit session_id=%s — user=%s is_active=%s ended_at=%s",
+                session_id, user_id,
+                session_rec.is_active if session_rec else "MISSING",
+                session_rec.ended_at if session_rec else "MISSING",
+            )
+
     exchanges = get_active_window(session_id, db)
+    logger.info(
+        "chat_service: loaded %d exchanges for session %s (user %s)",
+        len(exchanges), session_id, user_id,
+    )
     return _build_history_payload(session_id, exchanges, user_id, db)
 
 

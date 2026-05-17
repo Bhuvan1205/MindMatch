@@ -124,18 +124,33 @@ def roll_new_session(user_id: str, old_session_id: str, db: DBSession) -> str:
     return str(new_session.id)
 
 
-# ── Active window ─────────────────────────────────────────────────────────────
+# ── Single-session lookup ─────────────────────────────────────────────────────
+
+def get_session_by_id(session_id: str, db: DBSession) -> "ChatSession | None":
+    """Return a single ChatSession row by its UUID string, or None if not found."""
+    try:
+        return db.query(ChatSession).filter(ChatSession.id == uuid.UUID(session_id)).first()
+    except Exception:
+        return None
+
+
 
 def get_active_window(session_id: str, db: DBSession) -> list[ConversationExchange]:
     """
     Return the ordered list of ConversationExchange rows for this session.
+    Strictly scoped to session_id — never loads cross-session messages.
     """
-    return (
+    results = (
         db.query(ConversationExchange)
         .filter(ConversationExchange.session_id == uuid.UUID(session_id))
         .order_by(ConversationExchange.created_at.asc())
         .all()
     )
+    logger.info(
+        "memory_manager: get_active_window session_id=%s → %d exchanges",
+        session_id, len(results),
+    )
+    return results
 
 
 # ── Threshold check + summarization ──────────────────────────────────────────

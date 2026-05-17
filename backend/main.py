@@ -61,6 +61,34 @@ def create_tables():
             "UPDATE chat_sessions SET ended_at = created_at WHERE is_active = FALSE AND ended_at IS NULL;"
         ))
 
+    # 4. Ensure the Matcha System Bot user exists (for anonymous relay mediation)
+    from sqlalchemy.orm import Session
+    with Session(engine) as db_session:
+        matcha_bot_id = uuid.UUID('11111111-1111-1111-1111-111111111111')
+        matcha_user = db_session.query(User).filter(User.id == matcha_bot_id).first()
+        if not matcha_user:
+            matcha_user = User(
+                id=matcha_bot_id,
+                username="matcha_system_bot",
+                email="bot@mindmatch.local",
+                hashed_password="NOPASSWORD_SYSTEM_ACCOUNT"
+            )
+            db_session.add(matcha_user)
+            db_session.commit()
+            
+        matcha_profile = db_session.query(UserProfile).filter(UserProfile.user_id == matcha_bot_id).first()
+        if not matcha_profile:
+            matcha_profile = UserProfile(
+                user_id=matcha_bot_id,
+                name="Matcha (System)",
+                interests=["mediation", "anonymity"],
+                goals=["helping you connect safely"],
+                learning_preferences=[],
+                collaboration_preferences=[]
+            )
+            db_session.add(matcha_profile)
+            db_session.commit()
+
 # =========================================================
 # CORS — allows the frontend to call the API
 # Set ALLOWED_ORIGINS env var to a comma-separated list of allowed origins
@@ -1141,6 +1169,48 @@ def send_direct_message(
     db.add(message)
     db.commit()
     db.refresh(message)
+
+    # ── Relay Mediation Logic: If message is sent to Matcha System Bot ──────
+    matcha_bot_id = _uuid.UUID('11111111-1111-1111-1111-111111111111')
+    if receiver_id == matcha_bot_id:
+        from matcha_relay_service import answer_pending_relay
+        answered_relay = answer_pending_relay(str(current_user.id), body.message.strip(), db)
+        
+        if answered_relay:
+            # Deliver the answer to User A (the requester) from Matcha Bot
+            from experience_service import get_connection_between
+            from datetime import datetime
+            
+            requester_uuid = answered_relay.requester_id
+            
+            # Ensure User A <-> Matcha Bot connection exists
+            requester_bot_conn = get_connection_between(requester_uuid, matcha_bot_id, db)
+            if not requester_bot_conn:
+                requester_bot_conn = UserConnection(
+                    requester_id=requester_uuid,
+                    recipient_id=matcha_bot_id,
+                    status="accepted",
+                    recipient_request_seen_at=datetime.utcnow(),
+                    requester_accepted_seen_at=datetime.utcnow()
+                )
+                db.add(requester_bot_conn)
+                db.commit()
+                db.refresh(requester_bot_conn)
+            
+            # Name attribution
+            from models import UserProfile as _UP
+            target_profile = db.query(_UP).filter(_UP.user_id == current_user.id).order_by(_UP.created_at.desc()).first()
+            target_name = target_profile.name if target_profile else "Your match"
+
+            # Delivery message
+            delivery_msg = DirectMessage(
+                connection_id=requester_bot_conn.id,
+                sender_id=matcha_bot_id,
+                receiver_id=requester_uuid,
+                message=f"*[Matcha Relay Answer]*\n**{target_name}** replied:\n\n{answered_relay.response}\n\n*(Re: {answered_relay.question})*",
+            )
+            db.add(delivery_msg)
+            db.commit()
 
     return {
         "message_id": str(message.id),
