@@ -31,12 +31,29 @@ from models import Base, DirectMessage, User, UserConnection, UserProfile, Exper
 app = FastAPI()
 
 # =========================================================
-# CREATE TABLES ON STARTUP
+# CREATE / MIGRATE TABLES ON STARTUP
 # =========================================================
+
+# Columns that SQLAlchemy create_all() cannot add to *existing* tables.
+# Uses ADD COLUMN IF NOT EXISTS so it is fully idempotent on every deploy.
+_SCHEMA_MIGRATIONS = [
+    ("user_connections", "recipient_request_seen_at",  "TIMESTAMP"),
+    ("user_connections", "requester_accepted_seen_at", "TIMESTAMP"),
+]
 
 @app.on_event('startup')
 def create_tables():
+    from sqlalchemy import text
+
+    # 1. Create any tables that don't exist yet.
     Base.metadata.create_all(bind=engine)
+
+    # 2. Add any columns introduced after the table was first created.
+    with engine.begin() as conn:
+        for table, column, col_type in _SCHEMA_MIGRATIONS:
+            conn.execute(text(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type};"
+            ))
 
 # =========================================================
 # CORS — allows the frontend to call the API
