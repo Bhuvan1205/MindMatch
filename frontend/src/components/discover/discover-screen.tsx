@@ -2,9 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Compass, Loader2, Search } from "lucide-react";
+import { AlertCircle, Compass, Loader2, Search } from "lucide-react";
 
 import { EmptyState } from "@/components/feedback/empty-state";
 import { ConnectionRequestButton } from "@/components/shared/connection-request-button";
@@ -16,8 +16,9 @@ import type { SearchUserResult } from "@/lib/api/types";
 import { queryKeys } from "@/lib/query/query-keys";
 
 export function DiscoverScreen() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const initialQuery = searchParams.get("q") ?? "";
+  const initialQuery = (searchParams.get("q") ?? "").trim();
   const [query, setQuery] = React.useState(initialQuery);
   const queryClient = useQueryClient();
 
@@ -54,7 +55,15 @@ export function DiscoverScreen() {
               Find people by name, interests, goals, or discussion topics and request a connection even if they were not surfaced by the matching system.
             </p>
 
-            <DiscoverSearchForm initialQuery={initialQuery} query={query} setQuery={setQuery} />
+            <DiscoverSearchForm
+              initialQuery={initialQuery}
+              query={query}
+              setQuery={setQuery}
+              onSubmit={(value) => {
+                const trimmed = value.trim();
+                router.push(trimmed ? `/discover?q=${encodeURIComponent(trimmed)}` : "/discover");
+              }}
+            />
           </div>
 
           <div className="rounded-lg border bg-background/70 p-6 shadow-sm backdrop-blur-xl">
@@ -81,6 +90,13 @@ export function DiscoverScreen() {
             <div className="flex min-h-52 items-center justify-center">
               <Loader2 className="size-6 animate-spin text-muted-foreground" />
             </div>
+          ) : searchQuery.error ? (
+            <EmptyState
+              icon={AlertCircle}
+              title="Search unavailable"
+              description={searchQuery.error instanceof Error ? searchQuery.error.message : "Something went wrong while searching for users."}
+              className="max-w-md"
+            />
           ) : searchQuery.data && searchQuery.data.results.length > 0 ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {searchQuery.data.results.map((result) => (
@@ -111,21 +127,28 @@ function DiscoverSearchForm({
   initialQuery,
   query,
   setQuery,
+  onSubmit,
 }: {
   initialQuery: string;
   query: string;
   setQuery: React.Dispatch<React.SetStateAction<string>>;
+  onSubmit: (value: string) => void;
 }) {
   return (
-    <form action="/discover" className="mt-6 flex flex-col gap-3 sm:flex-row">
+    <form
+      className="mt-6 flex flex-col gap-3 sm:flex-row"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit(query);
+      }}
+    >
       <Input
-        name="q"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Search by name, interests, goals, or topics"
         className="h-11 rounded-full bg-background/85 px-5"
       />
-      <Button type="submit" className="h-11 rounded-full px-5" disabled={query.trim() === initialQuery.trim() && initialQuery.trim().length > 0}>
+      <Button type="submit" className="h-11 rounded-full px-5" disabled={query.trim() === initialQuery && initialQuery.length > 0}>
         <Search className="size-4" />
         Search
       </Button>

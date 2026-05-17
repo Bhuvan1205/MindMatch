@@ -73,11 +73,9 @@ export function NotificationCenter() {
     setDismissedKeys((current) => (current.includes(item.key) ? current : [...current, item.key]));
   }
 
-  function dismissAllVisibleMessages() {
-    const messageKeys = visiblePeople.flatMap((person) =>
-      person.items.filter((item) => item.kind === "message").map((item) => item.key),
-    );
-    setDismissedKeys((current) => [...new Set([...current, ...messageKeys])]);
+  function dismissAllVisible() {
+    const allKeys = visiblePeople.flatMap((person) => person.items.map((item) => item.key));
+    setDismissedKeys((current) => [...new Set([...current, ...allKeys])]);
   }
 
   return (
@@ -122,7 +120,7 @@ export function NotificationCenter() {
           </div>
 
           <div className="mt-3 max-h-96 space-y-3 overflow-y-auto">
-            {visiblePeople.some((person) => person.items.some((item) => item.kind === "message")) ? (
+            {totalVisible > 0 ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -130,12 +128,12 @@ export function NotificationCenter() {
                 className="w-full justify-start gap-2"
                 disabled={markAllReadMutation.isPending}
                 onClick={() => {
-                  dismissAllVisibleMessages();
+                  dismissAllVisible();
                   markAllReadMutation.mutate();
                 }}
               >
                 {markAllReadMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <CheckCheck className="size-4" />}
-                Mark all messages as read
+                Mark all as read
               </Button>
             ) : null}
 

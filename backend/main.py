@@ -1037,6 +1037,10 @@ def mark_all_notifications_read(
 ):
     from datetime import datetime
 
+    now = datetime.utcnow()
+    updated = 0
+
+    # 1. Mark all unread direct messages as read
     unread_messages = (
         db.query(DirectMessage)
         .filter(
@@ -1045,13 +1049,40 @@ def mark_all_notifications_read(
         )
         .all()
     )
-
-    now = datetime.utcnow()
     for message in unread_messages:
         message.read_at = now
+        updated += 1
+
+    # 2. Dismiss pending incoming connection-request notifications
+    pending_requests = (
+        db.query(UserConnection)
+        .filter(
+            UserConnection.recipient_id == current_user.id,
+            UserConnection.status == "pending",
+            UserConnection.recipient_request_seen_at.is_(None),
+        )
+        .all()
+    )
+    for conn in pending_requests:
+        conn.recipient_request_seen_at = now
+        updated += 1
+
+    # 3. Dismiss accepted-request notifications (requester side)
+    accepted_conns = (
+        db.query(UserConnection)
+        .filter(
+            UserConnection.requester_id == current_user.id,
+            UserConnection.status == "accepted",
+            UserConnection.requester_accepted_seen_at.is_(None),
+        )
+        .all()
+    )
+    for conn in accepted_conns:
+        conn.requester_accepted_seen_at = now
+        updated += 1
 
     db.commit()
-    return MarkAllNotificationsReadResponse(updated_count=len(unread_messages))
+    return MarkAllNotificationsReadResponse(updated_count=updated)
 
 
 @app.post('/connections/accept')
@@ -1298,7 +1329,9 @@ async def chat_stream(
 
 @app.post('/chat/end-session', response_model=ChatEndResponse)
 def chat_end_session(
-    current_user: User = Depends(get_current_user),
+    request: Request,
+    token: str | None = Query(default=None),
+    current_user: User | None = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -1307,15 +1340,38 @@ def chat_end_session(
     Compresses any remaining conversation into a long-term episodic memory,
     persists it to PostgreSQL and Pinecone, then rolls to a fresh session.
 
-    Auth: Required (Bearer JWT).
+    Auth: Required — either via Authorization header (normal) or
+          ?token=<jwt> query param (used by sendBeacon on tab close).
     """
+    import uuid as _uuid
+    from auth import decode_access_token
     from memory_manager import get_or_create_session
 
-    session_id = get_or_create_session(str(current_user.id), db)
+    # Resolve user from either the Authorization header or the ?token= query param.
+    auth_header = request.headers.get("Authorization", "")
+    resolved_user: User | None = None
+
+    if auth_header.startswith("Bearer "):
+        try:
+            user_id_str = decode_access_token(auth_header.split(" ", 1)[1])
+            resolved_user = db.query(User).filter(User.id == _uuid.UUID(user_id_str)).first()
+        except Exception:
+            pass
+    elif token:
+        try:
+            user_id_str = decode_access_token(token)
+            resolved_user = db.query(User).filter(User.id == _uuid.UUID(user_id_str)).first()
+        except Exception:
+            pass
+
+    if resolved_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    session_id = get_or_create_session(str(resolved_user.id), db)
 
     try:
         summary = memory_end_session(
-            user_id=str(current_user.id),
+            user_id=str(resolved_user.id),
             session_id=session_id,
             db=db,
         )

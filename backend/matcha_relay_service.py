@@ -27,9 +27,16 @@ def _strip_code_fences(text: str) -> str:
 
 
 _RELAY_KEYWORDS = (
-    "ask ", "tell ", "find out", "what does", "what is", "what are",
-    "relay", "can you ask", "can you tell", "pass this", "forward this",
-    "what's", "whats", "how is", "how does", "their ", "her ", "his ",
+    "ask ",
+    "tell ",
+    "find out",
+    "can you ask",
+    "can you tell",
+    "pass this",
+    "forward this",
+    "what's ",
+    "whats ",
+    "relay",
 )
 
 
@@ -39,7 +46,12 @@ def _looks_like_relay_intent(message: str) -> bool:
     return any(kw in lowered for kw in _RELAY_KEYWORDS)
 
 
-def detect_relay_intent(user_id: str, message: str, matched_profiles: list[dict] | None) -> dict | None:
+def detect_relay_intent(
+    user_id: str,
+    message: str,
+    matched_profiles: list[dict] | None,
+    active_window: list | None = None,
+) -> dict | None:
     if not matched_profiles:
         return None
     if not _looks_like_relay_intent(message):
@@ -61,6 +73,14 @@ def detect_relay_intent(user_id: str, message: str, matched_profiles: list[dict]
     if not matches_context:
         return None
 
+    # Build a concise recent-context snippet so the LLM can resolve references like "that"
+    context_lines = []
+    for ex in (active_window or [])[-6:]:  # last 6 turns
+        if isinstance(ex, dict):
+            context_lines.append(f"User: {ex.get('user_message', '')}")
+            context_lines.append(f"Matcha: {ex.get('assistant_message', '')}")
+    recent_context_str = "\n".join(context_lines) if context_lines else "(none)"
+
     prompt = [
         {
             "role": "system",
@@ -71,6 +91,8 @@ def detect_relay_intent(user_id: str, message: str, matched_profiles: list[dict]
                 "  - Names or refers to a person in the candidate list (e.g. 'ask Bhagya', 'tell Rahul', 'what is X doing')\n"
                 "  - Asks about that person's current activities, learning, projects, goals, opinions, advice, or experience\n"
                 "  - Uses phrasing like 'can you ask', 'find out from', 'ask them', 'what does X think', 'what is X learning'\n\n"
+                "IMPORTANT: Use the [Recent Conversation] to resolve vague references like 'that', 'this', 'it', 'the same thing'.\n"
+                "Rewrite the question to be self-contained and explicit — do not include pronouns or vague references.\n\n"
                 "Do NOT trigger relay for general questions not directed at a specific person in the list.\n\n"
                 "Return ONLY a raw JSON object — no markdown fences, no explanation — with exactly these keys:\n"
                 "  should_relay (bool), target_profile_id (string or null), rewritten_question (string), confidence (float 0-1)"
@@ -81,6 +103,7 @@ def detect_relay_intent(user_id: str, message: str, matched_profiles: list[dict]
             "content": (
                 f"[User ID]\n{user_id}\n\n"
                 f"[Candidates (similarity matches + connections)]\n{json.dumps(matches_context)}\n\n"
+                f"[Recent Conversation]\n{recent_context_str}\n\n"
                 f"[User Message]\n{message}"
             ),
         },

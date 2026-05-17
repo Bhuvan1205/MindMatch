@@ -171,6 +171,19 @@ function AssistantBubble({
   question?: string | null;
 }) {
   const isRelayCard = kind === "relay_pending" || kind === "relay_answer" || kind === "relay_inbound_prompt";
+
+  // Relay card bubbles: RelayStatusCard renders all relevant context.
+  // Suppress the raw text for pending/inbound cards (card covers everything).
+  // For relay_answer, strip the "Name replied through Matcha:\n\n" prefix.
+  const displayText = React.useMemo(() => {
+    if (kind === "relay_pending" || kind === "relay_inbound_prompt") return "";
+    if (kind === "relay_answer" && text) {
+      const markerIdx = text.indexOf(":\n\n");
+      if (markerIdx !== -1) return text.slice(markerIdx + 3);
+    }
+    return text;
+  }, [kind, text]);
+
   return (
     <motion.div
       key={id}
@@ -181,14 +194,14 @@ function AssistantBubble({
     >
       <div className="max-w-[84%] rounded-2xl rounded-tl-sm border border-border/60 bg-card/90 px-4 py-3 text-sm shadow-sm backdrop-blur-sm">
         {isRelayCard ? <RelayStatusCard kind={kind} targetName={targetName} question={question} /> : null}
-        {text ? (
+        {displayText ? (
           <>
-            <MarkdownContent content={text} />
+            <MarkdownContent content={displayText} />
             {streaming ? (
               <span className="mt-1 inline-block h-4 w-0.5 animate-pulse rounded-full bg-primary/70 align-middle" />
             ) : null}
           </>
-        ) : (
+        ) : isRelayCard ? null : (
           <TypingDots />
         )}
       </div>
@@ -284,6 +297,31 @@ export function ChatInterface() {
   const { setSessionId, setExchanges, clearChat, temporary, toggleTemporary } = useChatStore();
   const { profile } = useProfileStore();
 
+  // ── Auto-save on tab/window close ──────────────────────────────────────────
+  // sendBeacon is the only reliable way to fire a request during beforeunload.
+  // We skip this for temporary sessions since those are intentionally ephemeral.
+  React.useEffect(() => {
+    function handleBeforeUnload() {
+      if (temporary) return;
+      try {
+        const raw = localStorage.getItem("mindmatch-auth");
+        const token = raw ? (JSON.parse(raw) as { state?: { token?: string | null } }).state?.token : null;
+        const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+        const blob = new Blob(["{}"], { type: "application/json" });
+        // sendBeacon cannot set custom headers — use a URL param as a fallback bearer
+        const url = token
+          ? `${API_BASE}/chat/end-session?token=${encodeURIComponent(token)}`
+          : `${API_BASE}/chat/end-session`;
+        navigator.sendBeacon(url, blob);
+      } catch {
+        // Non-fatal — best-effort save
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [temporary]);
+
   const greetingText = React.useMemo(() => {
     const nameStr = profile?.name ? ` ${profile.name}` : " there";
     return `Hey${nameStr}! What's up?`;
@@ -305,11 +343,15 @@ export function ChatInterface() {
       mutationFn: mindmatchApi.chatEndSession,
       onSuccess: () => {
         clearChat();
+        lastAppliedSessionRef.current = null;
+        seenMessageIdsRef.current = new Set();
         setMessages([{ role: "assistant", text: greetingText, id: `greeting-${Date.now()}` }]);
         setConfirm(false);
       },
       onError: () => {
         clearChat();
+        lastAppliedSessionRef.current = null;
+        seenMessageIdsRef.current = new Set();
         setMessages([{ role: "assistant", text: greetingText, id: `greeting-${Date.now()}` }]);
         setConfirm(false);
       },
@@ -324,6 +366,8 @@ export function ChatInterface() {
           onClick={() => {
             if (temporary) {
               clearChat();
+              lastAppliedSessionRef.current = null;
+              seenMessageIdsRef.current = new Set();
               setMessages([{ role: "assistant", text: greetingText, id: `greeting-${Date.now()}` }]);
             } else {
               setConfirm(true);
@@ -375,15 +419,68 @@ export function ChatInterface() {
     queryKey: ["chat-history", temporary],
     queryFn: mindmatchApi.chatHistory,
     enabled: !temporary,
-    staleTime: 0,
-    refetchInterval: temporary || isStreaming ? false : 4000,
+    staleTime: 10_000,
+    refetchInterval: temporary || isStreaming ? false : 12_000,
   });
   const isHistoryLoading = historyQuery.isLoading;
 
+  // Track whether we have done the initial full hydration for this session.
+  // After the first load we only merge NEW relay cards to avoid replacing the
+  // entire messages array (which caused the visible stutter every 4 seconds).
+  const lastAppliedSessionRef = React.useRef<string | null>(null);
+  const seenMessageIdsRef = React.useRef<Set<string>>(new Set());
+
   React.useEffect(() => {
-    if (historyQuery.data && !isStreaming && !temporary) {
+    if (!historyQuery.data || isStreaming || temporary) return;
+
+    const { session_id: sessionId } = historyQuery.data;
+
+    if (lastAppliedSessionRef.current !== sessionId) {
+      // ── First load (or new session after end-session) ─────────────────────
       applyHistory(historyQuery.data);
+      lastAppliedSessionRef.current = sessionId;
+      // Record all message IDs we just rendered
+      seenMessageIdsRef.current = new Set(
+        (historyQuery.data.messages ?? []).map((m) => m.id),
+      );
+      return;
     }
+
+    // ── Subsequent polls: merge NEW relay-card messages ───────────────────────
+    // We only pick up relay cards that arrived since last poll.
+    // When a relay_pending card arrives, we also remove any streamed relay-notice
+    // bubble (plain assistant message containing "through Matcha") so the card
+    // becomes the single canonical representation without duplication.
+    const incoming = (historyQuery.data.messages ?? []).filter(
+      (m) => m.kind?.startsWith("relay_") && !seenMessageIdsRef.current.has(m.id),
+    );
+    if (incoming.length === 0) return;
+
+    incoming.forEach((m) => seenMessageIdsRef.current.add(m.id));
+    setMessages((prev) => {
+      // Remove streamed notice bubbles that are superseded by incoming relay cards
+      const hasNewPending = incoming.some((m) => m.kind === "relay_pending");
+      const filtered = hasNewPending
+        ? prev.filter(
+            (m) =>
+              m.role !== "assistant" ||
+              "kind" in m ||
+              !m.text.includes("through Matcha"),
+          )
+        : prev;
+
+      return [
+        ...filtered,
+        ...incoming.map((m) => ({
+          role: m.role,
+          text: m.text,
+          id: m.id,
+          kind: m.kind,
+          targetName: m.target_name,
+          question: m.question,
+        })),
+      ];
+    });
   }, [applyHistory, historyQuery.data, isStreaming, temporary]);
 
   React.useEffect(() => {
@@ -434,19 +531,34 @@ export function ChatInterface() {
 
     try {
       let accumulated = "";
-      for await (const token of streamChat(text, temporary, historyPayload)) {
-        accumulated += token;
+      let rafId: number | null = null;
+
+      const flush = (id: string) => {
         const snapshot = accumulated;
         setMessages((prev) =>
           prev.map((message) =>
-            message.id === assistantId ? { ...message, text: snapshot, streaming: true } : message,
+            message.id === id ? { ...message, text: snapshot, streaming: true } : message,
           ),
         );
+        rafId = null;
+      };
+
+      for await (const token of streamChat(text, temporary, historyPayload)) {
+        accumulated += token;
+        // Batch updates via requestAnimationFrame — renders at ~60fps instead of per-token
+        if (rafId === null) {
+          rafId = requestAnimationFrame(() => flush(assistantId));
+        }
       }
 
+      // Cancel any pending frame and do a final flush
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      const finalSnapshot = accumulated;
       setMessages((prev) =>
         prev.map((message) =>
-          message.id === assistantId ? { ...message, streaming: false } : message,
+          message.id === assistantId
+            ? { ...message, text: finalSnapshot, streaming: false }
+            : message,
         ),
       );
     } catch (err: unknown) {

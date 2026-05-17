@@ -130,10 +130,39 @@ def _build_history_payload(session_id: str, exchanges: list[ConversationExchange
 
 
 def _maybe_handle_matcha_relay_reply(user_id: str, message: str, db: DBSession) -> str | None:
+    """
+    If the user has an inbound pending relay (someone relayed a question to them through Matcha)
+    AND the current message looks like a substantive reply (not a new relay creation attempt),
+    save it as the relay answer and notify the user.
+
+    Guards:
+    - Message must be at least 10 characters (not just a greeting or one-liner).
+    - We skip relay-creation patterns so "ask X about Y" doesn't get consumed here.
+    """
+    # Quick pre-check: avoid consuming relay-creation messages as relay answers
+    msg_lower = message.lower().strip()
+    RELAY_CREATION_MARKERS = ("ask ", "tell ", "find out", "can you ask", "can you tell", "forward this")
+    if any(msg_lower.startswith(m) for m in RELAY_CREATION_MARKERS):
+        return None
+
+    # Minimum length guard — trivial messages shouldn't be relay answers
+    if len(message.strip()) < 10:
+        return None
+
+    pending = get_pending_relay_for_target(user_id, db)
+    if pending is None:
+        return None
+
+    # Save the raw reply as the relay answer
     answered_relay = answer_pending_relay(user_id, message, db)
-    if answered_relay is not None:
-        return "Thanks - I passed that back through Matcha so they can get your advice without a direct chat."
-    return None
+    if answered_relay is None:
+        return None
+
+    return (
+        "Thanks — I've passed your answer back through Matcha. "
+        "They'll see it in their Matcha chat without needing to open a direct conversation with you."
+    )
+
 
 
 def _build_relay_candidates(user_id: str, user_profile: dict, db: DBSession) -> list[dict]:
@@ -202,9 +231,15 @@ def _build_relay_candidates(user_id: str, user_profile: dict, db: DBSession) -> 
     return list(candidates.values())
 
 
-def _maybe_create_matcha_relay(user_id: str, message: str, db: DBSession, user_profile: dict) -> dict | None:
+def _maybe_create_matcha_relay(
+    user_id: str,
+    message: str,
+    db: DBSession,
+    user_profile: dict,
+    active_window: list | None = None,
+) -> dict | None:
     candidates = _build_relay_candidates(user_id, user_profile, db)
-    relay_intent = detect_relay_intent(user_id, message, candidates)
+    relay_intent = detect_relay_intent(user_id, message, candidates, active_window or [])
     if relay_intent is None:
         return None
 
@@ -260,11 +295,11 @@ def send_message(user_id: str, message: str, db: DBSession, temporary: bool = Fa
         _persist_exchange(user_id, session_id, message, relay_reply, db, temporary)
         return {"response": relay_reply, "session_id": session_id}
 
-    relay_request = _maybe_create_matcha_relay(user_id, message, db, user_profile)
+    relay_request = _maybe_create_matcha_relay(user_id, message, db, user_profile, active_window)
     relay_notice = relay_request["notice"] if relay_request else None
     if relay_request:
-        # Whether created or failed, return the relay notice and stop — do not call the LLM.
-        _persist_exchange(user_id, session_id, message, relay_notice, db, temporary)
+        # Do NOT persist relay creation notices — relay cards from build_chat_history_messages
+        # are the canonical history representation; persisting here would create duplicates.
         return {"response": relay_notice, "session_id": session_id}
 
     web_context = None
@@ -339,11 +374,10 @@ async def stream_message(
         yield "data: [DONE]\n\n"
         return
 
-    relay_request = _maybe_create_matcha_relay(user_id, message, db, user_profile)
+    relay_request = _maybe_create_matcha_relay(user_id, message, db, user_profile, active_window)
     relay_notice = relay_request["notice"] if relay_request else None
     if relay_request:
-        # Whether created or failed, return the relay notice and stop — do not call the LLM.
-        _persist_exchange(user_id, session_id, message, relay_notice, db, temporary)
+        # Do NOT persist relay creation notices — relay cards are the canonical history.
         yield f"data: {json.dumps(relay_notice)}\n\n"
         yield "data: [DONE]\n\n"
         return
